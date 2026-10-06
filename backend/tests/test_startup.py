@@ -30,7 +30,9 @@ async def test_lifespan_propagates_settings_errors(monkeypatch: pytest.MonkeyPat
 
 def test_run_uses_settings_for_server_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
-    settings = SimpleNamespace(host="0.0.0.0", port=9999, log_level="DEBUG", is_development=False)
+    settings = SimpleNamespace(
+        host="0.0.0.0", port=9999, log_level="DEBUG", is_development=False, reload=None
+    )
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: captured.update(kwargs))
 
@@ -42,3 +44,31 @@ def test_run_uses_settings_for_server_arguments(monkeypatch: pytest.MonkeyPatch)
         "log_level": "debug",
         "reload": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("is_development", "reload", "expected"),
+    [
+        (False, None, False),
+        (True, None, True),
+        (True, False, False),
+        (False, True, True),
+    ],
+)
+def test_run_derives_reload(
+    monkeypatch: pytest.MonkeyPatch, is_development: bool, reload: bool | None, expected: bool
+) -> None:
+    captured: dict[str, object] = {}
+    settings = SimpleNamespace(
+        host="0.0.0.0",
+        port=8100,
+        log_level="INFO",
+        is_development=is_development,
+        reload=reload,
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: captured.update(kwargs))
+
+    run()
+
+    assert captured["reload"] is expected
