@@ -1,10 +1,9 @@
 """Local Ollama provider over its HTTP chat API.
 
 Ollama streams newline-delimited JSON chunks from ``POST /api/chat``. This
-adapter normalizes them into :data:`~app.services.llm.base.LLMStreamEvent`
-values and maps tool definitions/arguments between our schema and Ollama's.
-Error messages are deliberately generic so no provider payload or credential can
-leak; the original exception is preserved as ``__cause__``.
+adapter normalizes them into the canonical streaming contract. Error messages are
+user-facing and safe; the original exception is preserved as ``__cause__`` and
+internal diagnostics stay in ``LLMProviderError.detail``.
 """
 
 from __future__ import annotations
@@ -17,15 +16,19 @@ from uuid import uuid4
 import httpx
 
 from app.services.llm.base import (
-    LLMErrorCode,
     LLMMessage,
     LLMProvider,
-    LLMProviderError,
     LLMRole,
     LLMStreamEvent,
     TextDelta,
     ToolCall,
     ToolDefinition,
+)
+from app.services.llm.errors import (
+    LLMErrorCode,
+    LLMProviderError,
+    error_from_http_status,
+    error_from_transport,
 )
 
 OLLAMA_PROVIDER_NAME = "ollama"
@@ -47,7 +50,10 @@ class OllamaProvider(LLMProvider):
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         if not model.strip():
-            raise LLMProviderError(LLMErrorCode.INVALID_CONFIG, "model must not be empty")
+            raise LLMProviderError(
+                LLMErrorCode.INVALID_CONFIG,
+                message="The model name must not be empty.",
+            )
         self._model = model
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
@@ -87,9 +93,8 @@ class OllamaProvider(LLMProvider):
             async with self._client.stream("POST", CHAT_PATH, json=payload) as response:
                 if response.status_code >= 400:
                     await response.aread()
-                    raise LLMProviderError(
-                        LLMErrorCode.UNAVAILABLE,
-                        f"Ollama returned status {response.status_code}",
+                    raise error_from_http_status(
+                        response.status_code, detail=f"HTTP {response.status_code}"
                     )
                 async for line in response.aiter_lines():
                     chunk = line.strip()
@@ -97,7 +102,10 @@ class OllamaProvider(LLMProvider):
                         continue
                     data = self._parse_chunk(chunk)
                     if data.get("error"):
-                        raise LLMProviderError(LLMErrorCode.UNAVAILABLE, "Ollama reported an error")
+                        raise LLMProviderError(
+                            LLMErrorCode.PROVIDER_UNAVAILABLE,
+                            detail="provider returned an error",
+                        )
                     message = data.get("message") or {}
                     content = message.get("content")
                     if content:
@@ -107,7 +115,7 @@ class OllamaProvider(LLMProvider):
                     if data.get("done"):
                         break
         except httpx.HTTPError as exc:
-            raise LLMProviderError(LLMErrorCode.UNAVAILABLE, "Could not reach Ollama") from exc
+            raise error_from_transport(exc, detail="Ollama transport error") from exc
 
     @staticmethod
     def _parse_chunk(chunk: str) -> dict[str, Any]:
@@ -115,19 +123,17 @@ class OllamaProvider(LLMProvider):
             data = json.loads(chunk)
         except json.JSONDecodeError as exc:
             raise LLMProviderError(
-                LLMErrorCode.BAD_RESPONSE, "Ollama streamed invalid data"
+                LLMErrorCode.MALFORMED_RESPONSE, detail="invalid JSON chunk"
             ) from exc
         if not isinstance(data, dict):
-            raise LLMProviderError(LLMErrorCode.BAD_RESPONSE, "Ollama streamed invalid data")
+            raise LLMProviderError(LLMErrorCode.MALFORMED_RESPONSE, detail="chunk is not an object")
         return data
 
     @staticmethod
     def _parse_tool_call(raw: Any) -> ToolCall:
         function = raw.get("function") if isinstance(raw, dict) else None
         if not isinstance(function, dict):
-            raise LLMProviderError(
-                LLMErrorCode.BAD_RESPONSE, "Ollama returned an invalid tool call"
-            )
+            raise LLMProviderError(LLMErrorCode.TOOL_CALL, detail="tool call without function")
         name = function.get("name")
         arguments: Any = function.get("arguments", {})
         if isinstance(arguments, str):
@@ -135,12 +141,10 @@ class OllamaProvider(LLMProvider):
                 arguments = json.loads(arguments)
             except json.JSONDecodeError as exc:
                 raise LLMProviderError(
-                    LLMErrorCode.BAD_RESPONSE, "Ollama returned invalid tool arguments"
+                    LLMErrorCode.TOOL_CALL, detail="invalid tool arguments"
                 ) from exc
         if not isinstance(name, str) or not name or not isinstance(arguments, dict):
-            raise LLMProviderError(
-                LLMErrorCode.BAD_RESPONSE, "Ollama returned an invalid tool call"
-            )
+            raise LLMProviderError(LLMErrorCode.TOOL_CALL, detail="invalid tool call")
         return ToolCall(id=str(uuid4()), name=name, arguments=arguments)
 
     @staticmethod

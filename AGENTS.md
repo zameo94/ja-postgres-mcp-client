@@ -119,6 +119,19 @@ short summary of the current architecture/state.
   tool/function calling, configuration validation and normalized errors.
 - Provider/model/base URL/API key are supplied by the client **per request**;
   the backend keeps no provider state.
+- **Canonical streaming contract** is defined in `app/services/llm/base.py`:
+  async iterator yielding `TextDelta` and complete `ToolCall` events; errors are
+  **raised** as `LLMProviderError`, never yielded; the relative order of text and
+  tool calls is **not guaranteed**. The agent consumes this contract only and
+  never provider-specific types.
+- **Error model** lives in `app/services/llm/errors.py`: stable wire codes
+  (`LLMErrorCode`), explicit user-facing messages, and an internal `detail` that
+  is never serialized (`to_dict()` exposes `code` + `message` only).
+- **SSRF policy** lives in `app/services/llm/url_policy.py`; every user-supplied
+  provider base URL must pass through it before reaching `httpx`. The future
+  settings/chat endpoint must build the provider through this validation and must
+  never hand an arbitrary URL to the client library. DNS-rebinding hardening is
+  deferred to that endpoint (see module docstring).
 
 ## Persistence scope (MVP)
 

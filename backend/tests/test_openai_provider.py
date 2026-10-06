@@ -6,14 +6,13 @@ import httpx
 import pytest
 
 from app.services.llm.base import (
-    LLMErrorCode,
     LLMMessage,
-    LLMProviderError,
     LLMRole,
     TextDelta,
     ToolCall,
     ToolDefinition,
 )
+from app.services.llm.errors import LLMErrorCode, LLMProviderError
 from app.services.llm.providers.openai import OpenAIProvider
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -26,9 +25,11 @@ def _sse(*events: dict[str, Any]) -> bytes:
     return ("\n\n".join(lines) + "\n\n").encode()
 
 
-def _provider(handler: Handler) -> OpenAIProvider:
+def _provider(handler: Handler, *, allow_insecure: bool = False) -> OpenAIProvider:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return OpenAIProvider(BASE_URL, "secret-key", "gpt-4o-mini", client=client)
+    return OpenAIProvider(
+        BASE_URL, "secret-key", "gpt-4o-mini", allow_insecure=allow_insecure, client=client
+    )
 
 
 async def _collect(provider: OpenAIProvider, **kwargs: Any) -> list[Any]:
@@ -53,7 +54,17 @@ async def test_streams_text_deltas() -> None:
     assert events == [TextDelta("Hel"), TextDelta("lo")]
 
 
-async def test_reassembles_fragmented_tool_calls() -> None:
+async def test_joins_json_split_across_data_lines() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = b'data: {"choices":\ndata: [{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, content=content)
+
+    events = await _collect(_provider(handler))
+
+    assert events == [TextDelta("hi")]
+
+
+async def test_reassembles_fragmented_tool_calls_by_index() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -92,6 +103,139 @@ async def test_reassembles_fragmented_tool_calls() -> None:
     events = await _collect(_provider(handler))
 
     assert events == [ToolCall(id="call_1", name="db_list_tables", arguments={"schema": "public"})]
+
+
+async def test_keeps_parallel_tool_calls_separate_and_ordered() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_1",
+                                        "function": {
+                                            "name": "db_list_tables",
+                                            "arguments": '{"schema":',
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 1,
+                                        "id": "call_2",
+                                        "function": {"name": "db_health", "arguments": "{}"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [{"index": 0, "function": {"arguments": '"public"}'}}]
+                            }
+                        }
+                    ]
+                },
+            ),
+        )
+
+    events = await _collect(_provider(handler))
+
+    assert events == [
+        ToolCall(id="call_1", name="db_list_tables", arguments={"schema": "public"}),
+        ToolCall(id="call_2", name="db_health", arguments={}),
+    ]
+
+
+async def test_correlates_by_id_when_index_is_absent() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_x",
+                                        "function": {"name": "db_health", "arguments": "{"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [{"id": "call_x", "function": {"arguments": "}"}}]
+                            }
+                        }
+                    ]
+                },
+            ),
+        )
+
+    events = await _collect(_provider(handler))
+
+    assert events == [ToolCall(id="call_x", name="db_health", arguments={})]
+
+
+async def test_tool_call_without_index_or_id_is_rejected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"delta": {"tool_calls": [{"function": {"arguments": "{}"}}]}}]},
+            ),
+        )
+
+    with pytest.raises(LLMProviderError) as exc:
+        await _collect(_provider(handler))
+
+    assert exc.value.code is LLMErrorCode.TOOL_CALL
+
+
+async def test_empty_arguments_default_to_empty_object() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "id": "call_1", "function": {"name": "db_health"}}
+                                ]
+                            }
+                        }
+                    ]
+                },
+            ),
+        )
+
+    events = await _collect(_provider(handler))
+
+    assert events == [ToolCall(id="call_1", name="db_health", arguments={})]
 
 
 async def test_payload_carries_model_temperature_tools_and_auth() -> None:
@@ -170,7 +314,7 @@ async def test_encodes_assistant_tool_calls_and_tool_results() -> None:
     }
 
 
-async def test_ignores_non_data_lines() -> None:
+async def test_ignores_comments_and_non_data_lines() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -182,44 +326,64 @@ async def test_ignores_non_data_lines() -> None:
     assert events == [TextDelta("x")]
 
 
-async def test_malformed_event_raises_bad_response() -> None:
+async def test_malformed_event_raises_malformed_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"data: {not-json}\n\n")
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.BAD_RESPONSE
+    assert exc.value.code is LLMErrorCode.MALFORMED_RESPONSE
 
 
-async def test_http_error_raises_unavailable() -> None:
+async def test_truncated_stream_raises_streaming_protocol() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b'data: {"choices":[{"delta":{"content":"x"}}]}\n')
+
+    with pytest.raises(LLMProviderError) as exc:
+        await _collect(_provider(handler))
+
+    assert exc.value.code is LLMErrorCode.STREAMING_PROTOCOL
+
+
+async def test_auth_error_raises_authentication() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, content=b"unauthorized")
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.UNAVAILABLE
+    assert exc.value.code is LLMErrorCode.AUTHENTICATION
 
 
-async def test_transport_error_raises_unavailable() -> None:
+async def test_rate_limit_raises_rate_limited() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, content=b"slow down")
+
+    with pytest.raises(LLMProviderError) as exc:
+        await _collect(_provider(handler))
+
+    assert exc.value.code is LLMErrorCode.RATE_LIMITED
+
+
+async def test_transport_error_raises_transport_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("no route")
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.UNAVAILABLE
+    assert exc.value.code is LLMErrorCode.TRANSPORT
 
 
-async def test_error_field_raises_unavailable() -> None:
+async def test_error_field_raises_provider_unavailable() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=_sse({"error": {"message": "bad key"}}))
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.UNAVAILABLE
+    assert exc.value.code is LLMErrorCode.PROVIDER_UNAVAILABLE
 
 
 @pytest.mark.parametrize(
@@ -227,6 +391,7 @@ async def test_error_field_raises_unavailable() -> None:
     [
         ("not-a-url", "key", "model"),
         ("ftp://api.example.com", "key", "model"),
+        ("http://api.example.com", "key", "model"),
         (BASE_URL, "   ", "model"),
         (BASE_URL, "key", "   "),
     ],
@@ -236,6 +401,13 @@ def test_rejects_invalid_configuration(base_url: str, api_key: str, model: str) 
         OpenAIProvider(base_url, api_key, model)
 
     assert exc.value.code is LLMErrorCode.INVALID_CONFIG
+
+
+async def test_insecure_mode_allows_local_http_endpoint() -> None:
+    provider = OpenAIProvider("http://localhost:1234/v1", "key", "model", allow_insecure=True)
+
+    assert provider.name == "external_api"
+    await provider.aclose()
 
 
 async def test_aclose_leaves_injected_client_open() -> None:
