@@ -49,10 +49,11 @@ def run() -> None:
     import uvicorn
 
     settings: Settings = get_settings()
+    reload = settings.reload if settings.reload is not None else settings.is_development
     uvicorn.run(
         "app.main:app",
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
-        reload=settings.is_development,
+        reload=reload,
     )

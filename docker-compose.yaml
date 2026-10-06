@@ -1,0 +1,64 @@
+# Development stack: client backend + frontend + a local Ollama.
+#
+#   docker compose up --build
+#
+# The MCP server is a SEPARATE project and runs on the host (its own Compose or
+# process). The backend container reaches it via host.docker.internal, so the MCP
+# server's JA_POSTGRES_ALLOWED_HOSTS must include host.docker.internal:8000
+# (the server validates the Host header). Verified against the sibling project.
+#
+# All published ports are bound to 127.0.0.1 only, so services are not exposed on
+# the LAN (Ollama has no authentication).
+#
+# These ports (8100/3000/11434) clash with a native run: stop the native backend,
+# frontend or Ollama before `docker compose up`.
+#
+# Ollama models are not downloaded automatically; pull one once, e.g.:
+#   docker compose exec ollama ollama pull llama3.1
+#
+# Backend and frontend also run natively (poetry / npm) using the root .env;
+# this Compose overrides the URLs to container-internal names. Pin OLLAMA_IMAGE
+# for a reproducible environment.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      JA_CLIENT_ENVIRONMENT: development
+      JA_CLIENT_MCP_SERVER_URL: http://host.docker.internal:8000/mcp
+      JA_CLIENT_OLLAMA_BASE_URL: http://ollama:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8100:8100"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      - ollama
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_BASE_URL: http://backend:8100
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+volumes:
+  ollama-data:
