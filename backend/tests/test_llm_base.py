@@ -79,4 +79,8 @@ def test_provider_cannot_be_instantiated_without_stream() -> None:
 
 
 async def test_aclose_is_a_noop_by_default() -> None:
-    assert await FakeProvider().aclose() is None
+    provider = FakeProvider()
+
+    await provider.aclose()
+
+    assert provider.received is None
