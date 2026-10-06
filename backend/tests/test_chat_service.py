@@ -258,6 +258,31 @@ async def test_logs_do_not_contain_the_api_key(
     assert "sk-super-secret" not in caplog.text
 
 
+async def test_logs_turn_lifecycle_without_secrets(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    provider = ScriptedProvider([[TextDelta("ok")]])
+    _use_provider(monkeypatch, provider)
+    service = ChatService(_settings(monkeypatch), FakeMCP())
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="hi")],
+        provider=ProviderConfig(
+            provider="external_api",
+            model="m",
+            base_url="https://api.example.com/v1",
+            api_key="sk-super-secret",
+        ),
+    )
+
+    with caplog.at_level(logging.INFO):
+        _ = [event async for event in service.stream(request)]
+
+    text = caplog.text
+    assert "chat turn started" in text
+    assert "chat turn finished" in text
+    assert "sk-super-secret" not in text
+
+
 async def test_ssrf_rejection_maps_to_invalid_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

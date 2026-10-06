@@ -110,9 +110,24 @@ def test_chat_rejects_assistant_as_last_message() -> None:
     assert response.status_code == 422
 
 
+def test_chat_rejects_control_characters_in_model() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/chat",
+        json={
+            "messages": [{"role": "user", "content": "hi"}],
+            "provider": {"provider": "ollama", "model": "bad\nmodel"},
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_chat_endpoint_wires_the_real_lifespan(monkeypatch: Any) -> None:
     monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", "http://mcp.local/mcp")
     monkeypatch.setattr("app.services.chat.build_provider", _fake_build_provider)
+    monkeypatch.setattr("app.main.configure_logging", lambda level: None)
     get_settings.cache_clear()
     app = create_app()
     try:

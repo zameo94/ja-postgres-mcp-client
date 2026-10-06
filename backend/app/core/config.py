@@ -39,6 +39,9 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
 class Settings(BaseSettings):
     """Validated, environment-driven application settings.
 
@@ -56,7 +59,7 @@ class Settings(BaseSettings):
     )
 
     environment: Literal["development", "production"] = "development"
-    log_level: str = "INFO"
+    log_level: LogLevel = "INFO"
     host: str = "127.0.0.1"
     port: int = Field(default=8100, ge=1, le=65535)
     reload: bool | None = None
@@ -72,6 +75,13 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Whether the app runs in a development environment."""
         return self.environment == "development"
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.upper()
+        return value
 
     @field_validator("mcp_server_url", "ollama_base_url")
     @classmethod

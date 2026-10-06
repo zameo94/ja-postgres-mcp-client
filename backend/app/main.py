@@ -10,6 +10,7 @@ first request.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -18,20 +19,25 @@ from fastapi import FastAPI
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.core.config import Settings, get_settings
+from app.core.logging import configure_logging
 from app.services.mcp.client import StreamableHTTPMCPClient
 
 APP_NAME = "ja-postgres-mcp-client"
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = get_settings()
+    configure_logging(settings.log_level)
+    logger.info("starting %s (environment=%s)", APP_NAME, settings.environment)
     app.state.settings = settings
     app.state.mcp = StreamableHTTPMCPClient(settings.mcp_server_url)
     try:
         yield
     finally:
         await app.state.mcp.aclose()
+        logger.info("stopped %s", APP_NAME)
 
 
 def create_app() -> FastAPI:
