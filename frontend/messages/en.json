@@ -1,0 +1,18 @@
+{
+  "common": {
+    "appName": "ja-postgres-mcp-client"
+  },
+  "chat": {
+    "title": "PostgreSQL chat",
+    "emptyState": "Ask a question about your database to get started.",
+    "inputPlaceholder": "Ask a question about your data...",
+    "send": "Send",
+    "openSettings": "Settings"
+  },
+  "settings": {
+    "title": "Settings"
+  },
+  "errors": {
+    "generic": "Something went wrong."
+  }
+}
