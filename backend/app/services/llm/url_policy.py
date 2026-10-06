@@ -125,6 +125,8 @@ def _reject_blocked_address(address: str, *, allow_insecure: bool) -> None:
     if parsed is None:
         # Fail closed: an address we cannot parse is treated as untrusted.
         raise _invalid_address_error()
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
+        parsed = parsed.ipv4_mapped
     if parsed.is_link_local or parsed.is_reserved or parsed.is_multicast or parsed.is_unspecified:
         raise _metadata_error()
     if not allow_insecure and (parsed.is_loopback or parsed.is_private):

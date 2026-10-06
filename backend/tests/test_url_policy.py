@@ -95,16 +95,25 @@ def test_metadata_hostname_rejected() -> None:
     "url",
     [
         "https://[::ffff:169.254.169.254]/v1",
-        "https://[::ffff:127.0.0.1]/v1",
         "https://[64:ff9b::a00:1]/v1",
         "https://[fe80::1]/v1",
     ],
 )
-def test_ipv6_embedded_and_link_local_are_rejected(url: str) -> None:
-    # Pins ipaddress behaviour (Py 3.12): these are reserved/link-local, so they
-    # are rejected even in insecure mode.
+def test_ipv6_link_local_and_metadata_are_rejected(url: str) -> None:
+    # Link-local/metadata/reserved addresses are rejected even in insecure mode.
     with pytest.raises(LLMProviderError):
         validate_provider_base_url(url, allow_insecure=True)
+
+
+def test_ipv4_mapped_loopback_follows_ipv4_rules() -> None:
+    # An IPv4-mapped loopback must behave like 127.0.0.1: blocked in production,
+    # allowed only in insecure (development) mode.
+    url = "https://[::ffff:127.0.0.1]/v1"
+
+    with pytest.raises(LLMProviderError):
+        validate_provider_base_url(url, allow_insecure=False)
+
+    assert validate_provider_base_url(url, allow_insecure=True) == url
 
 
 async def test_resolves_public_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
