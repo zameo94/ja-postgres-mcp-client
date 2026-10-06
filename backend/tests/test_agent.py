@@ -150,7 +150,10 @@ async def test_temperature_is_forwarded_to_provider() -> None:
 async def test_executes_tool_and_continues() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [TextDelta("done")]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content='{"status":"ok"}')})
+    mcp = FakeMCP(
+        tools=[_tool()],
+        results={"db_health": MCPToolResult(content='{"status":"ok"}')},
+    )
     agent = Agent(provider, mcp)
 
     events = await _run(agent, [_user("health?")])
@@ -166,7 +169,7 @@ async def test_executes_tool_and_continues() -> None:
 async def test_second_call_includes_tool_history() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [TextDelta("done")]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content="ok")})
+    mcp = FakeMCP(tools=[_tool()], results={"db_health": MCPToolResult(content="ok")})
     agent = Agent(provider, mcp)
 
     await _run(agent, [_user("q")])
@@ -182,7 +185,7 @@ async def test_second_call_includes_tool_history() -> None:
 async def test_does_not_mutate_input_messages() -> None:
     original = [_user("q")]
     provider = ScriptedProvider([[_call()], [TextDelta("done")]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content="ok")})
+    mcp = FakeMCP(tools=[_tool()], results={"db_health": MCPToolResult(content="ok")})
     agent = Agent(provider, mcp)
 
     await _run(agent, original)
@@ -208,7 +211,10 @@ async def test_executes_parallel_tool_calls_in_order() -> None:
     first = ToolCall(id="c1", name="a", arguments={"x": 1})
     second = ToolCall(id="c2", name="b", arguments={"y": 2})
     provider = ScriptedProvider([[first, second], [TextDelta("ok")]])
-    mcp = FakeMCP(results={"a": MCPToolResult(content="A"), "b": MCPToolResult(content="B")})
+    mcp = FakeMCP(
+        tools=[_tool("a"), _tool("b")],
+        results={"a": MCPToolResult(content="A"), "b": MCPToolResult(content="B")},
+    )
     agent = Agent(provider, mcp)
 
     await _run(agent, [_user()])
@@ -219,7 +225,10 @@ async def test_executes_parallel_tool_calls_in_order() -> None:
 async def test_forwards_tool_error_result_with_marker() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [TextDelta("recovered")]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content="boom", is_error=True)})
+    mcp = FakeMCP(
+        tools=[_tool()],
+        results={"db_health": MCPToolResult(content="boom", is_error=True)},
+    )
     agent = Agent(provider, mcp)
 
     events = await _run(agent, [_user()])
@@ -247,7 +256,7 @@ async def test_unknown_tool_returns_error_without_mcp_call() -> None:
 async def test_mcp_tool_error_becomes_error_result() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [TextDelta("ok")]])
-    mcp = FakeMCP(call_error=MCPToolError("protocol error"))
+    mcp = FakeMCP(tools=[_tool()], call_error=MCPToolError("protocol error"))
     agent = Agent(provider, mcp)
 
     events = await _run(agent, [_user()])
@@ -260,7 +269,7 @@ async def test_mcp_tool_error_becomes_error_result() -> None:
 async def test_mcp_tool_errors_are_tolerated_up_to_the_limit_then_raised() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [call]])
-    mcp = FakeMCP(call_error=MCPToolError("dead"))
+    mcp = FakeMCP(tools=[_tool()], call_error=MCPToolError("dead"))
     agent = Agent(provider, mcp, max_tool_failures=1)
 
     with pytest.raises(MCPToolError):
@@ -270,7 +279,7 @@ async def test_mcp_tool_errors_are_tolerated_up_to_the_limit_then_raised() -> No
 async def test_mcp_connection_error_from_call_is_fatal() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [TextDelta("x")]])
-    mcp = FakeMCP(call_error=MCPConnectionError("down"))
+    mcp = FakeMCP(tools=[_tool()], call_error=MCPConnectionError("down"))
     agent = Agent(provider, mcp)
 
     with pytest.raises(MCPConnectionError):
@@ -281,7 +290,7 @@ async def test_long_tool_result_is_truncated() -> None:
     call = _call()
     big = "x" * (MAX_TOOL_RESULT_CHARS + 500)
     provider = ScriptedProvider([[call], [TextDelta("done")]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content=big)})
+    mcp = FakeMCP(tools=[_tool()], results={"db_health": MCPToolResult(content=big)})
     agent = Agent(provider, mcp)
 
     events = await _run(agent, [_user()])
@@ -294,7 +303,7 @@ async def test_long_tool_result_is_truncated() -> None:
 async def test_exactly_max_tool_rounds_then_final_answer_succeeds() -> None:
     call = _call()
     provider = ScriptedProvider([[call], [TextDelta("final")]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content="ok")})
+    mcp = FakeMCP(tools=[_tool()], results={"db_health": MCPToolResult(content="ok")})
     agent = Agent(provider, mcp, max_tool_rounds=1)
 
     events = await _run(agent, [_user()])
@@ -305,7 +314,7 @@ async def test_exactly_max_tool_rounds_then_final_answer_succeeds() -> None:
 async def test_error_is_raised_after_partial_deltas() -> None:
     call = _call()
     provider = ScriptedProvider([[TextDelta("preamble"), call], [TextDelta("more"), call]])
-    mcp = FakeMCP(results={"db_health": MCPToolResult(content="ok")})
+    mcp = FakeMCP(tools=[_tool()], results={"db_health": MCPToolResult(content="ok")})
     agent = Agent(provider, mcp, max_tool_rounds=1)
 
     emitted: list[Any] = []
