@@ -5,6 +5,7 @@ description = "FastAPI + agent backend for ja-postgres-mcp-client."
 requires-python = ">=3.12,<4"
 dependencies = [
     "fastapi[standard]>=0.115",
+    "httpx>=0.28",
     "pydantic-settings>=2.6",
 ]
 
