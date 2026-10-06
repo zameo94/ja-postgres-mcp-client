@@ -2,40 +2,126 @@
 
 Works with any endpoint that speaks the OpenAI Chat Completions protocol
 (OpenAI, OpenRouter, vLLM, ...). The base URL, API key and model are supplied by
-the user per request.
+the user per request, so the base URL is validated against the SSRF policy before
+it reaches ``httpx``.
 
-The provider streams Server-Sent Events and reassembles tool calls, which OpenAI
-sends as fragmented deltas keyed by ``index``. Error messages are deliberately
-generic: the API key and provider payloads never appear in them, and the
-original exception is preserved as ``__cause__``.
+Streaming uses the shared :class:`~app.services.llm.sse.SSEDecoder` (framing),
+a JSON step, and a domain step. Tool calls arrive as fragmented deltas and are
+correlated deterministically (see :class:`_ToolCallAccumulator`).
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
 
 from app.services.llm.base import (
-    LLMErrorCode,
     LLMMessage,
     LLMProvider,
-    LLMProviderError,
     LLMRole,
     LLMStreamEvent,
     TextDelta,
     ToolCall,
     ToolDefinition,
 )
+from app.services.llm.errors import (
+    LLMErrorCode,
+    LLMProviderError,
+    error_from_http_status,
+    error_from_transport,
+)
+from app.services.llm.sse import SSEDecoder
+from app.services.llm.url_policy import validate_provider_base_url
 
 EXTERNAL_API_PROVIDER_NAME = "external_api"
 CHAT_PATH = "/chat/completions"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DONE_MARKER = "[DONE]"
+
+
+@dataclass
+class _PendingToolCall:
+    index: int | None = None
+    id: str | None = None
+    name_parts: list[str] = field(default_factory=list)
+    argument_parts: list[str] = field(default_factory=list)
+
+
+class _ToolCallAccumulator:
+    """Correlates streaming tool-call deltas deterministically.
+
+    A delta is keyed by its ``index`` when present, otherwise by its ``id``;
+    a delta with neither is a protocol error. There is never a silent fallback
+    to index 0, so distinct calls cannot be merged.
+    """
+
+    def __init__(self) -> None:
+        self._calls: dict[object, _PendingToolCall] = {}
+
+    def add(self, deltas: Any) -> None:
+        if not isinstance(deltas, list):
+            return
+        for delta in deltas:
+            if not isinstance(delta, dict):
+                raise LLMProviderError(
+                    LLMErrorCode.TOOL_CALL, detail="tool call delta is not an object"
+                )
+            index_value = delta.get("index")
+            index = (
+                index_value
+                if isinstance(index_value, int) and not isinstance(index_value, bool)
+                else None
+            )
+            id_value = delta.get("id")
+            call_id = id_value if isinstance(id_value, str) and id_value else None
+            if index is not None:
+                key: object = ("index", index)
+            elif call_id is not None:
+                key = ("id", call_id)
+            else:
+                raise LLMProviderError(
+                    LLMErrorCode.TOOL_CALL,
+                    detail="tool call delta without index or id",
+                )
+
+            entry = self._calls.get(key)
+            if entry is None:
+                entry = _PendingToolCall(index=index, id=call_id)
+                self._calls[key] = entry
+            if entry.id is None and call_id is not None:
+                entry.id = call_id
+            if entry.index is None and index is not None:
+                entry.index = index
+
+            function = delta.get("function")
+            if isinstance(function, dict):
+                name = function.get("name")
+                if isinstance(name, str):
+                    entry.name_parts.append(name)
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    entry.argument_parts.append(arguments)
+
+    def finalize(self) -> list[ToolCall]:
+        calls: list[ToolCall] = []
+        for entry in self._calls.values():
+            name = "".join(entry.name_parts)
+            raw_arguments = "".join(entry.argument_parts) or "{}"
+            try:
+                arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError as exc:
+                raise LLMProviderError(
+                    LLMErrorCode.TOOL_CALL, detail="invalid tool arguments"
+                ) from exc
+            if not name or not isinstance(arguments, dict):
+                raise LLMProviderError(LLMErrorCode.TOOL_CALL, detail="invalid tool call")
+            calls.append(ToolCall(id=entry.id or str(uuid4()), name=name, arguments=arguments))
+        return calls
 
 
 class OpenAIProvider(LLMProvider):
@@ -49,19 +135,23 @@ class OpenAIProvider(LLMProvider):
         api_key: str,
         model: str,
         *,
+        allow_insecure: bool = False,
         client: httpx.AsyncClient | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        parts = urlsplit(base_url.strip())
-        if parts.scheme not in {"http", "https"} or not parts.netloc:
-            raise LLMProviderError(
-                LLMErrorCode.INVALID_CONFIG, "base_url must be an absolute http(s) URL"
-            )
+        self._base_url = validate_provider_base_url(base_url, allow_insecure=allow_insecure).rstrip(
+            "/"
+        )
         if not api_key.strip():
-            raise LLMProviderError(LLMErrorCode.INVALID_CONFIG, "api_key must not be empty")
+            raise LLMProviderError(
+                LLMErrorCode.INVALID_CONFIG,
+                message="The API key must not be empty.",
+            )
         if not model.strip():
-            raise LLMProviderError(LLMErrorCode.INVALID_CONFIG, "model must not be empty")
-        self._base_url = base_url.rstrip("/")
+            raise LLMProviderError(
+                LLMErrorCode.INVALID_CONFIG,
+                message="The model name must not be empty.",
+            )
         self._api_key = api_key
         self._model = model
         self._owns_client = client is None
@@ -98,7 +188,7 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.0,
     ) -> AsyncIterator[LLMStreamEvent]:
         payload = self._payload(messages, tools, temperature)
-        pending: dict[int, dict[str, str]] = {}
+        accumulator = _ToolCallAccumulator()
         try:
             async with self._client.stream(
                 "POST",
@@ -108,36 +198,39 @@ class OpenAIProvider(LLMProvider):
             ) as response:
                 if response.status_code >= 400:
                     await response.aread()
-                    raise LLMProviderError(
-                        LLMErrorCode.UNAVAILABLE,
-                        f"Provider returned status {response.status_code}",
+                    raise error_from_http_status(
+                        response.status_code, detail=f"HTTP {response.status_code}"
                     )
+                decoder = SSEDecoder()
                 async for line in response.aiter_lines():
-                    chunk = line.strip()
-                    if not chunk or not chunk.startswith("data:"):
+                    event = decoder.feed(line)
+                    if event is None:
                         continue
-                    data = chunk[len("data:") :].strip()
-                    if data == DONE_MARKER:
+                    if event.data == DONE_MARKER:
                         break
-                    event = self._parse_event(data)
-                    if event.get("error"):
+                    data = self._parse_event(event.data)
+                    if data.get("error"):
                         raise LLMProviderError(
-                            LLMErrorCode.UNAVAILABLE, "Provider reported an error"
+                            LLMErrorCode.PROVIDER_UNAVAILABLE,
+                            detail="provider returned an error",
                         )
-                    choices = event.get("choices") or []
+                    choices = data.get("choices") or []
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
                     content = delta.get("content")
-                    if content:
+                    if isinstance(content, str) and content:
                         yield TextDelta(content)
-                    self._accumulate_tool_calls(delta.get("tool_calls"), pending)
+                    accumulator.add(delta.get("tool_calls"))
+                if decoder.close() is not None:
+                    raise LLMProviderError(
+                        LLMErrorCode.STREAMING_PROTOCOL,
+                        detail="stream ended mid-event",
+                    )
         except httpx.HTTPError as exc:
-            raise LLMProviderError(
-                LLMErrorCode.UNAVAILABLE, "Could not reach the provider"
-            ) from exc
+            raise error_from_transport(exc, detail="provider transport error") from exc
 
-        for call in self._finalize_tool_calls(pending):
+        for call in accumulator.finalize():
             yield call
 
     @staticmethod
@@ -146,53 +239,11 @@ class OpenAIProvider(LLMProvider):
             event = json.loads(data)
         except json.JSONDecodeError as exc:
             raise LLMProviderError(
-                LLMErrorCode.BAD_RESPONSE, "Provider streamed invalid data"
+                LLMErrorCode.MALFORMED_RESPONSE, detail="invalid JSON event"
             ) from exc
         if not isinstance(event, dict):
-            raise LLMProviderError(LLMErrorCode.BAD_RESPONSE, "Provider streamed invalid data")
+            raise LLMProviderError(LLMErrorCode.MALFORMED_RESPONSE, detail="event is not an object")
         return event
-
-    @staticmethod
-    def _accumulate_tool_calls(deltas: Any, pending: dict[int, dict[str, str]]) -> None:
-        if not isinstance(deltas, list):
-            return
-        for delta in deltas:
-            if not isinstance(delta, dict):
-                continue
-            raw_index = delta.get("index", 0)
-            index = raw_index if isinstance(raw_index, int) else 0
-            entry = pending.setdefault(index, {"id": "", "name": "", "arguments": ""})
-            call_id = delta.get("id")
-            if isinstance(call_id, str) and call_id:
-                entry["id"] = call_id
-            function = delta.get("function")
-            if isinstance(function, dict):
-                name = function.get("name")
-                if isinstance(name, str):
-                    entry["name"] += name
-                arguments = function.get("arguments")
-                if isinstance(arguments, str):
-                    entry["arguments"] += arguments
-
-    @staticmethod
-    def _finalize_tool_calls(pending: dict[int, dict[str, str]]) -> list[ToolCall]:
-        calls: list[ToolCall] = []
-        for index in sorted(pending):
-            entry = pending[index]
-            name = entry["name"]
-            raw_arguments = entry["arguments"] or "{}"
-            try:
-                arguments = json.loads(raw_arguments)
-            except json.JSONDecodeError as exc:
-                raise LLMProviderError(
-                    LLMErrorCode.BAD_RESPONSE, "Provider returned invalid tool arguments"
-                ) from exc
-            if not name or not isinstance(arguments, dict):
-                raise LLMProviderError(
-                    LLMErrorCode.BAD_RESPONSE, "Provider returned an invalid tool call"
-                )
-            calls.append(ToolCall(id=entry["id"] or str(uuid4()), name=name, arguments=arguments))
-        return calls
 
     @staticmethod
     def _encode_message(message: LLMMessage) -> dict[str, Any]:

@@ -1,7 +1,14 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import DEFAULT_OLLAMA_BASE_URL, Settings
+from app.core.config import (
+    DEFAULT_OLLAMA_BASE_URL,
+    ENV_FILE,
+    PROJECT_ROOT,
+    Settings,
+)
 
 MCP_URL = "http://localhost:8000/mcp"
 
@@ -55,3 +62,20 @@ def test_rejects_out_of_range_port(monkeypatch: pytest.MonkeyPatch, port: str) -
     monkeypatch.setenv("JA_CLIENT_PORT", port)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_env_file_is_anchored_to_project_root() -> None:
+    assert ENV_FILE == PROJECT_ROOT / ".env"
+    assert ENV_FILE.is_absolute()
+
+
+def test_real_environment_wins_over_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("JA_CLIENT_MCP_SERVER_URL=http://from-file.invalid/mcp\n")
+    monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", "http://from-env.invalid/mcp")
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.mcp_server_url == "http://from-env.invalid/mcp"
