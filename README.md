@@ -73,6 +73,29 @@ required.
 | `JA_CLIENT_MCP_TOOL_TIMEOUT`    | `30`                        | seconds                        |
 | `JA_CLIENT_OLLAMA_BASE_URL`     | `http://localhost:11434`    | dev fallback (UI selects it)   |
 
+## Development
+
+Backend:
+
+```sh
+cd backend
+poetry install
+poetry run uvicorn app.main:app --reload --host 127.0.0.1 --port 8100
+```
+
+Health check: `GET http://127.0.0.1:8100/health` → `{"status":"ok"}`.
+
+Frontend:
+
+```sh
+cd frontend
+npm install
+npm run dev   # http://localhost:3000
+```
+
+The UI is currently a static chat shell (i18n in English only); chat behaviour is
+added in later steps.
+
 ## MVP limitations
 
 - Chat history is **in-memory** and lost on page reload.
