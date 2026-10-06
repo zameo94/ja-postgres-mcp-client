@@ -1,0 +1,78 @@
+"""Centralized application configuration.
+
+Every environment-specific value is read from the process environment (with an
+optional ``.env`` file) exactly here, and validated once. The rest of the
+application depends on the typed :class:`Settings` object, never on
+``os.environ`` directly.
+
+Configuration is split by concern:
+
+* application -- how the HTTP server runs;
+* MCP -- how to reach the separate ``ja-postgres-mcp`` server;
+* provider defaults -- development fallbacks for the LLM provider, whose real
+  settings are chosen by the user in the browser and sent per request.
+
+The MVP has no server-side secrets: the external provider API key is supplied
+by the client per request and is never persisted on the backend.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal
+from urllib.parse import urlsplit
+
+from pydantic import Field, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+
+
+class Settings(BaseSettings):
+    """Validated, environment-driven application settings.
+
+    ``JA_CLIENT_`` is the environment variable prefix; ``.env`` (then
+    ``../.env``) is loaded as a fallback, with real environment variables
+    taking precedence.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="JA_CLIENT_",
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    environment: Literal["development", "production"] = "development"
+    log_level: str = "INFO"
+    host: str = "127.0.0.1"
+    port: int = Field(default=8100, ge=1, le=65535)
+
+    mcp_server_url: str
+    mcp_connect_timeout: float = Field(default=10.0, gt=0)
+    mcp_tool_timeout: float = Field(default=30.0, gt=0)
+
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+
+    @property
+    def is_development(self) -> bool:
+        """Whether the app runs in a development environment."""
+        return self.environment == "development"
+
+    @field_validator("mcp_server_url", "ollama_base_url")
+    @classmethod
+    def _validate_http_url(cls, value: str, info: ValidationInfo) -> str:
+        parts = urlsplit(value)
+        if parts.scheme not in {"http", "https"} or not parts.netloc:
+            raise ValueError(f"{info.field_name} must be an absolute http(s) URL")
+        return value
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return process-wide settings, read from the environment once.
+
+    Raises ``pydantic.ValidationError`` early if required values are missing or
+    invalid, so misconfiguration surfaces at startup rather than on first use.
+    """
+    return Settings()
