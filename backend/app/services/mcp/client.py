@@ -71,7 +71,7 @@ class StreamableHTTPMCPClient(MCPClient):
         except MCPError:
             raise
         except Exception as exc:
-            raise MCPConnectionError("Could not list tools from the MCP server") from exc
+            raise MCPConnectionError(detail="list_tools failed") from exc
 
         return [self._to_tool(tool) for tool in getattr(result, "tools", None) or []]
 
@@ -82,7 +82,7 @@ class StreamableHTTPMCPClient(MCPClient):
         except MCPError:
             raise
         except Exception as exc:
-            raise MCPToolError("Could not call the MCP server tool") from exc
+            raise MCPToolError(detail="call_tool failed") from exc
 
         return MCPToolResult(
             content=self._render_result(result),

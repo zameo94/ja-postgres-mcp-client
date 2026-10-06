@@ -119,6 +119,9 @@ short summary of the current architecture/state.
   tool/function calling, configuration validation and normalized errors.
 - Provider/model/base URL/API key are supplied by the client **per request**;
   the backend keeps no provider state.
+- A **server-side system prompt** (`JA_CLIENT_SYSTEM_PROMPT`, with a built-in
+  default) is prepended as a `system` message to every chat turn. It is
+  operator-controlled and not user-editable.
 - **Canonical streaming contract** is defined in `app/services/llm/base.py`:
   async iterator yielding `TextDelta` and complete `ToolCall` events; errors are
   **raised** as `LLMProviderError`, never yielded; the relative order of text and
@@ -156,6 +159,9 @@ short summary of the current architecture/state.
 - The chat is **in-memory** for the browser session only. Design the agent so
   persistence could be added later without rewriting the core logic, but do
   **not** add a repository/DB abstraction now.
+- Cross-turn replay is **text-only**: previous assistant tool calls and tool
+  results are not sent back to the model (stateless design). Tracked as a README
+  MVP limitation.
 - The only persisted state is the user's **provider settings**, stored in the
   browser:
   - provider selection, model, base URL: `localStorage`.
@@ -174,12 +180,19 @@ short summary of the current architecture/state.
 - Streaming is Server-Sent Events, produced by FastAPI and consumed by the
   browser. The endpoint is a thin transport adapter; business logic lives in the
   agent layer.
-- Define a small, stable, typed event model (conceptually `message_start`,
-  `token`, `tool_call`, `tool_result`, `message_end`, `error`); the final event
-  names are decided in the streaming task, based on the real agent architecture.
-- Handle client disconnects, preserve event ordering, keep the event loop
-  unblocked, separate transport from agent concerns, and never leak internal
-  exceptions or secrets to the browser.
+- Fixed event model (`ChatEventType`, whose values are the wire names):
+  `message_start {provider, model}` once; then `token {text}`,
+  `tool_call {id,name,arguments}`, `tool_result {id,name,content,is_error}` as
+  they occur; terminal `message_end {}` on success, or `error {code, message}`.
+- Semantics: `error` is **terminal** — no `message_end` follows it. A stream that
+  ends without a terminal event means the client disconnected. Errors may occur
+  **after** partial tokens (a tool turn calls the model more than once).
+- Failures are mapped to `{code, message}`: `LLMProviderError`, `AgentError` and
+  `MCPError.to_dict()`. Unexpected failures become `internal_error` and are
+  logged server-side (never leaked). Expected errors are logged at warning with
+  `code` + internal `detail`, never the payload or credentials.
+- Handle client disconnects (close the per-request provider), keep the event
+  loop unblocked, and never leak internal exceptions or secrets.
 
 ## i18n
 

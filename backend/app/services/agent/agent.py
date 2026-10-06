@@ -127,7 +127,7 @@ class Agent:
                         tool_failures += 1
                         if tool_failures > self._max_tool_failures:
                             raise
-                        content = f"Tool execution failed: {exc}"
+                        content = f"Tool error: {exc.message}"
                         is_error = True
                     else:
                         content = self._render_content(result.content, is_error=result.is_error)

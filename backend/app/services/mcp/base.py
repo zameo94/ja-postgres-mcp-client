@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 
@@ -34,16 +35,47 @@ class MCPToolResult:
     is_error: bool = False
 
 
+class MCPErrorCode(StrEnum):
+    """Stable error codes. Each member's *value* is the wire code."""
+
+    CONNECTION = "mcp_connection_error"
+    TOOL = "mcp_tool_error"
+
+
+_MESSAGES: dict[MCPErrorCode, str] = {
+    MCPErrorCode.CONNECTION: "The database service could not be reached.",
+    MCPErrorCode.TOOL: "The database service failed to run the tool.",
+}
+
+
 class MCPError(Exception):
-    """Base class for MCP client failures."""
+    """Base class for MCP client failures.
+
+    ``message`` is user-safe; internal diagnostics go in ``detail`` and are never
+    serialized. ``to_dict`` exposes the client-facing representation.
+    """
+
+    code: MCPErrorCode
+
+    def __init__(self, message: str | None = None, *, detail: str | None = None) -> None:
+        self.message: str = message or _MESSAGES[self.code]
+        self.detail: str | None = detail
+        super().__init__(self.message)
+
+    def to_dict(self) -> dict[str, str]:
+        return {"code": self.code.value, "message": self.message}
 
 
 class MCPConnectionError(MCPError):
     """The MCP server could not be reached or the session could not be used."""
 
+    code = MCPErrorCode.CONNECTION
+
 
 class MCPToolError(MCPError):
     """The MCP server failed to execute a tool at the protocol level."""
+
+    code = MCPErrorCode.TOOL
 
 
 class MCPClient(ABC):
