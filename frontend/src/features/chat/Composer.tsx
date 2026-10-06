@@ -8,7 +8,7 @@ export function Composer({
   onStop,
   isStreaming,
 }: {
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string) => Promise<boolean>;
   onStop: () => void;
   isStreaming: boolean;
 }) {
@@ -16,10 +16,10 @@ export function Composer({
   const [value, setValue] = useState("");
   const canSend = value.trim().length > 0 && !isStreaming;
 
-  function submit(): void {
+  async function submit(): Promise<void> {
     if (!canSend) return;
-    onSubmit(value.trim());
-    setValue("");
+    const accepted = await onSubmit(value.trim());
+    if (accepted) setValue("");
   }
 
   return (
@@ -27,7 +27,7 @@ export function Composer({
       className="mx-auto flex w-full max-w-3xl items-end gap-2"
       onSubmit={(event) => {
         event.preventDefault();
-        submit();
+        void submit();
       }}
     >
       <textarea
@@ -40,7 +40,7 @@ export function Composer({
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            submit();
+            void submit();
           }
         }}
         className="min-h-[44px] flex-1 resize-none rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-60"

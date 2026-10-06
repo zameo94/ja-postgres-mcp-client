@@ -1,20 +1,35 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 
+import { loadProviderSettings, requireApiKey } from "@/lib/provider-settings";
 import type { ChatError, ProviderConfig } from "@/lib/types";
+import { SettingsPanel } from "@/features/settings/SettingsPanel";
 
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { useChat } from "./useChat";
 
-// Placeholder until the settings UI (next task) lets the user choose the provider.
 const DEFAULT_PROVIDER: ProviderConfig = { provider: "ollama", model: "llama3.1" };
 
 export function ChatPage() {
   const t = useTranslations("chat");
   const tErrors = useTranslations("errors");
-  const { messages, isStreaming, error, send, stop } = useChat(DEFAULT_PROVIDER);
+  const [provider, setProvider] = useState<ProviderConfig>(DEFAULT_PROVIDER);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { messages, isStreaming, error, send, stop } = useChat(provider, requireApiKey);
+
+  useEffect(() => {
+    const stored = loadProviderSettings();
+    if (stored) {
+      setProvider({
+        provider: stored.provider,
+        model: stored.model,
+        base_url: stored.base_url || undefined,
+      });
+    }
+  }, []);
 
   return (
     <div className="flex h-dvh flex-col">
@@ -22,8 +37,8 @@ export function ChatPage() {
         <h1 className="text-base font-semibold">{t("title")}</h1>
         <button
           type="button"
-          disabled
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 disabled:opacity-50"
+          onClick={() => setSettingsOpen(true)}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600"
         >
           {t("openSettings")}
         </button>
@@ -45,6 +60,14 @@ export function ChatPage() {
       <footer className="border-t border-slate-200 bg-white p-4">
         <Composer onSubmit={send} onStop={stop} isStreaming={isStreaming} />
       </footer>
+
+      {settingsOpen && (
+        <SettingsPanel
+          initial={provider}
+          onSubmit={setProvider}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }
