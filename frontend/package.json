@@ -17,6 +17,9 @@
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
+  "overrides": {
+    "@swc/helpers": "0.5.23"
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@testing-library/jest-dom": "6.6.3",
