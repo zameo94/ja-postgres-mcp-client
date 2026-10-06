@@ -23,7 +23,7 @@ describe("ChatPage", () => {
 
     expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument();
     expect(screen.getByText("emptyState")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "openSettings" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "openSettings" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "send" })).toBeDisabled();
   });
 
