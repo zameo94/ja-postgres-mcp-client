@@ -133,6 +133,22 @@ short summary of the current architecture/state.
   never hand an arbitrary URL to the client library. DNS-rebinding hardening is
   deferred to that endpoint (see module docstring).
 
+## Agent
+
+- Lives in `app/services/agent/`; drives one turn: messages -> LLM -> complete
+  tool calls -> MCP -> tool results -> LLM -> response. Depends only on the LLM
+  contract and the MCP client interface (no HTTP/SSE/provider specifics).
+- Tool failures are handled at the agent level: an **unknown tool** becomes an
+  error result with no MCP round-trip; an **MCP tool-level failure** becomes an
+  error result up to `max_tool_failures` per turn, then is re-raised; an **MCP
+  connection failure** is fatal. Parallel tool calls are executed **sequentially**
+  (deterministic ordering). Tool result content is capped at
+  `MAX_TOOL_RESULT_CHARS` with an explicit truncation marker.
+- Errors may be raised **mid-stream** (after some deltas), because a tool turn
+  calls the model more than once; the SSE layer must handle an error after
+  partial output. The caller owns provider/MCP lifecycle (the agent never closes
+  them).
+
 ## Persistence scope (MVP)
 
 - The server is **stateless**: no PostgreSQL, no users, no auth, no sessions, no
