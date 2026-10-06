@@ -161,6 +161,20 @@ def test_rejects_invalid_url(url: str) -> None:
         StreamableHTTPMCPClient(url)
 
 
+def test_mcp_error_to_dict_is_user_safe() -> None:
+    connection = MCPConnectionError()
+    tool = MCPToolError()
+
+    assert connection.to_dict() == {
+        "code": "mcp_connection_error",
+        "message": "The database service could not be reached.",
+    }
+    assert tool.to_dict() == {
+        "code": "mcp_tool_error",
+        "message": "The database service failed to run the tool.",
+    }
+
+
 def test_client_is_abstract_and_concrete_is_an_instance() -> None:
     with pytest.raises(TypeError):
         MCPClient()  # type: ignore[abstract]
