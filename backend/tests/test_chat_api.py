@@ -37,9 +37,13 @@ class FakeProvider(LLMProvider):
         yield TextDelta("hi")
 
 
+async def _fake_build_provider(*args: Any, **kwargs: Any) -> FakeProvider:
+    return FakeProvider()
+
+
 def _app(monkeypatch: Any) -> Any:
     monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", "http://mcp.local/mcp")
-    monkeypatch.setattr("app.services.chat.build_provider", lambda *args, **kwargs: FakeProvider())
+    monkeypatch.setattr("app.services.chat.build_provider", _fake_build_provider)
     app = create_app()
     app.state.settings = Settings(_env_file=None)
     app.state.mcp = FakeMCP()
@@ -108,7 +112,7 @@ def test_chat_rejects_assistant_as_last_message() -> None:
 
 def test_chat_endpoint_wires_the_real_lifespan(monkeypatch: Any) -> None:
     monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", "http://mcp.local/mcp")
-    monkeypatch.setattr("app.services.chat.build_provider", lambda *args, **kwargs: FakeProvider())
+    monkeypatch.setattr("app.services.chat.build_provider", _fake_build_provider)
     get_settings.cache_clear()
     app = create_app()
     try:

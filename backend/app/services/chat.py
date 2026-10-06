@@ -62,7 +62,7 @@ class ChatService:
 
     async def stream(self, request: ChatRequest) -> AsyncIterator[ChatEvent]:
         try:
-            provider = build_provider(
+            provider = await build_provider(
                 request.provider.provider,
                 model=request.provider.model,
                 ollama_base_url=self._settings.ollama_base_url,

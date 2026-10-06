@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -102,7 +103,10 @@ def _request(**provider_kwargs: Any) -> ChatRequest:
 
 
 def _use_provider(monkeypatch: pytest.MonkeyPatch, provider: LLMProvider) -> None:
-    monkeypatch.setattr("app.services.chat.build_provider", lambda *args, **kwargs: provider)
+    async def fake(*args: Any, **kwargs: Any) -> LLMProvider:
+        return provider
+
+    monkeypatch.setattr("app.services.chat.build_provider", fake)
 
 
 async def test_streams_text_then_message_end(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,7 +160,7 @@ async def test_maps_tool_events(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_provider_construction_error_emits_only_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def boom(*args: Any, **kwargs: Any) -> LLMProvider:
+    async def boom(*args: Any, **kwargs: Any) -> LLMProvider:
         raise LLMProviderError(LLMErrorCode.INVALID_CONFIG)
 
     monkeypatch.setattr("app.services.chat.build_provider", boom)
@@ -171,7 +175,7 @@ async def test_provider_construction_error_emits_only_error(
 async def test_unexpected_provider_construction_error_is_internal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def boom(*args: Any, **kwargs: Any) -> LLMProvider:
+    async def boom(*args: Any, **kwargs: Any) -> LLMProvider:
         raise RuntimeError("bug")
 
     monkeypatch.setattr("app.services.chat.build_provider", boom)
@@ -229,3 +233,50 @@ async def test_unexpected_runtime_error_is_mapped_to_internal(
 
     assert [event.name for event in events] == ["message_start", "error"]
     assert events[1].data == {"code": "internal_error", "message": "An unexpected error occurred."}
+
+
+async def test_logs_do_not_contain_the_api_key(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    provider = ScriptedProvider(error=LLMProviderError(LLMErrorCode.AUTHENTICATION))
+    _use_provider(monkeypatch, provider)
+    service = ChatService(_settings(monkeypatch), FakeMCP())
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="hi")],
+        provider=ProviderConfig(
+            provider="external_api",
+            model="m",
+            base_url="https://api.example.com/v1",
+            api_key="sk-super-secret",
+        ),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        events = [event async for event in service.stream(request)]
+
+    assert events[-1].name == "error"
+    assert "sk-super-secret" not in caplog.text
+
+
+async def test_ssrf_rejection_maps_to_invalid_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def reject(url: str, *, allow_insecure: bool) -> str:
+        raise LLMProviderError(LLMErrorCode.INVALID_CONFIG)
+
+    monkeypatch.setattr("app.services.llm.factory.resolve_and_validate_provider_base_url", reject)
+    service = ChatService(_settings(monkeypatch), FakeMCP())
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="hi")],
+        provider=ProviderConfig(
+            provider="external_api",
+            model="m",
+            base_url="https://evil.example/v1",
+            api_key="k",
+        ),
+    )
+
+    events = [event async for event in service.stream(request)]
+
+    assert [event.name for event in events] == ["error"]
+    assert events[0].data["code"] == "invalid_config"
