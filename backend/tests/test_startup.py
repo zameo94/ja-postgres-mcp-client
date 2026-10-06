@@ -7,8 +7,11 @@ from app.main import create_app, lifespan, run
 
 
 async def test_lifespan_loads_settings_onto_app_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = SimpleNamespace(mcp_server_url="http://mcp.local/mcp")
+    settings = SimpleNamespace(
+        mcp_server_url="http://mcp.local/mcp", log_level="INFO", environment="development"
+    )
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.configure_logging", lambda level: None)
 
     app = create_app()
     async with lifespan(app):

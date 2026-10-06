@@ -7,7 +7,9 @@ only serializes these; it contains no orchestration logic.
 
 from __future__ import annotations
 
+import itertools
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -24,15 +26,17 @@ from app.services.agent.events import (
     AgentToolResult,
 )
 from app.services.llm.base import LLMMessage, LLMRole
-from app.services.llm.errors import LLMProviderError
+from app.services.llm.errors import DEFAULT_MESSAGES, LLMErrorCode, LLMProviderError
 from app.services.llm.factory import build_provider
 from app.services.mcp.base import MCPClient, MCPError
 
 logger = logging.getLogger(__name__)
 
+_TURN_IDS = itertools.count(1)
+
 INTERNAL_ERROR: dict[str, str] = {
-    "code": "internal_error",
-    "message": "An unexpected error occurred.",
+    "code": LLMErrorCode.INTERNAL.value,
+    "message": DEFAULT_MESSAGES[LLMErrorCode.INTERNAL],
 }
 
 
@@ -79,6 +83,14 @@ class ChatService:
             yield ChatEvent(ChatEventType.ERROR, dict(INTERNAL_ERROR))
             return
 
+        turn = next(_TURN_IDS)
+        started = time.perf_counter()
+        logger.info(
+            "chat turn started: turn=%d provider=%s model=%s",
+            turn,
+            request.provider.provider,
+            request.provider.model,
+        )
         try:
             yield ChatEvent(
                 ChatEventType.MESSAGE_START,
@@ -90,18 +102,30 @@ class ChatService:
             ):
                 yield _to_chat_event(event)
         except (LLMProviderError, AgentError) as exc:
-            logger.warning("agent turn failed: code=%s detail=%s", exc.code.value, exc.detail)
+            logger.warning(
+                "agent turn failed: turn=%d code=%s detail=%s",
+                turn,
+                exc.code.value,
+                exc.detail,
+            )
             yield ChatEvent(ChatEventType.ERROR, exc.to_dict())
         except MCPError as exc:
-            logger.warning("mcp failure: code=%s detail=%s", exc.code.value, exc.detail)
+            logger.warning(
+                "mcp failure: turn=%d code=%s detail=%s", turn, exc.code.value, exc.detail
+            )
             yield ChatEvent(ChatEventType.ERROR, exc.to_dict())
         except Exception:
-            logger.exception("unexpected error while streaming chat")
+            logger.exception("unexpected error while streaming chat: turn=%d", turn)
             yield ChatEvent(ChatEventType.ERROR, dict(INTERNAL_ERROR))
         else:
             yield ChatEvent(ChatEventType.MESSAGE_END, {})
         finally:
             await provider.aclose()
+            logger.info(
+                "chat turn finished: turn=%d duration_ms=%d",
+                turn,
+                int((time.perf_counter() - started) * 1000),
+            )
 
     def _build_messages(self, request: ChatRequest) -> list[LLMMessage]:
         messages = [_to_message(message) for message in request.messages]

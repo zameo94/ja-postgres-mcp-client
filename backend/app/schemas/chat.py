@@ -34,6 +34,13 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
 
+    @field_validator("model")
+    @classmethod
+    def _reject_control_characters(cls, value: str) -> str:
+        if any(ord(character) < 32 for character in value):
+            raise ValueError("model must not contain control characters")
+        return value
+
     @model_validator(mode="after")
     def _require_external_credentials(self) -> ProviderConfig:
         if self.provider == "external_api" and (not self.base_url or not self.api_key):

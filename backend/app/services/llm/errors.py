@@ -46,7 +46,7 @@ DEFAULT_MESSAGES: dict[LLMErrorCode, str] = {
     LLMErrorCode.MALFORMED_RESPONSE: "The provider returned an invalid response.",
     LLMErrorCode.TOOL_CALL: "The provider returned an invalid tool call.",
     LLMErrorCode.STREAMING_PROTOCOL: ("The provider stream sent an invalid or incomplete message."),
-    LLMErrorCode.INTERNAL: ("An unexpected error occurred while contacting the provider."),
+    LLMErrorCode.INTERNAL: "An unexpected error occurred.",
 }
 
 _STATUS_MESSAGES: dict[int, str] = {
