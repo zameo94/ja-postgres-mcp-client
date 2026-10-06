@@ -7,12 +7,36 @@
     "emptyState": "Ask a question about your database to get started.",
     "inputPlaceholder": "Ask a question about your data...",
     "send": "Send",
-    "openSettings": "Settings"
+    "stop": "Stop",
+    "openSettings": "Settings",
+    "toolRunning": "Running {name}...",
+    "toolDone": "Used {name}",
+    "toolError": "Tool {name} failed"
   },
   "settings": {
     "title": "Settings"
   },
   "errors": {
-    "generic": "Something went wrong."
+    "generic": "Something went wrong.",
+    "invalid_config": "The provider configuration is invalid.",
+    "authentication_failed": "The API key was rejected by the provider.",
+    "request_rejected": "The provider rejected the request.",
+    "rate_limited": "The provider is rate limiting requests. Please try again later.",
+    "provider_unavailable": "The provider is currently unavailable.",
+    "provider_timeout": "The provider did not respond in time.",
+    "transport_error": "The provider could not be reached.",
+    "malformed_response": "The provider returned an invalid response.",
+    "tool_call_error": "The provider returned an invalid tool call.",
+    "streaming_protocol_error": "The provider stream sent an invalid or incomplete message.",
+    "internal_error": "An unexpected error occurred.",
+    "mcp_connection_error": "The database service could not be reached.",
+    "mcp_tool_error": "The database service failed to run the tool.",
+    "tool_loop_exceeded": "The assistant used too many tools. Please try again.",
+    "validation_error": "The request was rejected as invalid.",
+    "stream_incomplete": "The connection ended before the answer completed.",
+    "stream_timeout": "The provider stopped responding.",
+    "protocol_error": "The server sent an invalid event.",
+    "network_error": "The connection was interrupted.",
+    "http_error": "The server returned an error."
   }
 }
