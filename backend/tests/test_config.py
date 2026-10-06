@@ -79,3 +79,14 @@ def test_real_environment_wins_over_env_file(
     settings = Settings(_env_file=env_file)
 
     assert settings.mcp_server_url == "http://from-env.invalid/mcp"
+
+
+def test_system_prompt_has_default_and_is_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", MCP_URL)
+    monkeypatch.delenv("JA_CLIENT_SYSTEM_PROMPT", raising=False)
+
+    assert Settings(_env_file=None).system_prompt
+
+    monkeypatch.setenv("JA_CLIENT_SYSTEM_PROMPT", "custom instructions")
+
+    assert Settings(_env_file=None).system_prompt == "custom instructions"

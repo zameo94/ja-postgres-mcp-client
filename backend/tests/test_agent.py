@@ -263,7 +263,7 @@ async def test_mcp_tool_error_becomes_error_result() -> None:
 
     result = next(event for event in events if isinstance(event, AgentToolResult))
     assert result.is_error is True
-    assert result.content == "Tool execution failed: protocol error"
+    assert result.content == "Tool error: protocol error"
 
 
 async def test_mcp_tool_errors_are_tolerated_up_to_the_limit_then_raised() -> None:

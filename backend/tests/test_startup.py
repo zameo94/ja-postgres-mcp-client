@@ -7,12 +7,13 @@ from app.main import create_app, lifespan, run
 
 
 async def test_lifespan_loads_settings_onto_app_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    sentinel = object()
-    monkeypatch.setattr("app.main.get_settings", lambda: sentinel)
+    settings = SimpleNamespace(mcp_server_url="http://mcp.local/mcp")
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     app = create_app()
     async with lifespan(app):
-        assert app.state.settings is sentinel
+        assert app.state.settings is settings
+        assert app.state.mcp is not None
 
 
 async def test_lifespan_propagates_settings_errors(monkeypatch: pytest.MonkeyPatch) -> None:

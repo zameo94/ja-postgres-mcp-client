@@ -30,6 +30,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ENV_FILE = PROJECT_ROOT / ".env"
 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_SYSTEM_PROMPT = (
+    "You are an assistant that answers questions about a PostgreSQL database. "
+    "Use the provided read-only tools to inspect the schema and run queries. "
+    "Base every answer on the tool results and never invent data. "
+    "If a query returns no rows, say so. "
+    "Answer in the same language as the user."
+)
 
 
 class Settings(BaseSettings):
@@ -58,6 +65,7 @@ class Settings(BaseSettings):
     mcp_tool_timeout: float = Field(default=30.0, gt=0)
 
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     @property
     def is_development(self) -> bool:
