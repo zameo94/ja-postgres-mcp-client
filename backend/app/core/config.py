@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "127.0.0.1"
     port: int = Field(default=8100, ge=1, le=65535)
+    reload: bool | None = None
 
     mcp_server_url: str
     mcp_connect_timeout: float = Field(default=10.0, gt=0)
