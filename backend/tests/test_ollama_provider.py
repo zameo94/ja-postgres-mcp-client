@@ -6,14 +6,13 @@ import httpx
 import pytest
 
 from app.services.llm.base import (
-    LLMErrorCode,
     LLMMessage,
-    LLMProviderError,
     LLMRole,
     TextDelta,
     ToolCall,
     ToolDefinition,
 )
+from app.services.llm.errors import LLMErrorCode, LLMProviderError
 from app.services.llm.providers.ollama import OllamaProvider
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -171,44 +170,44 @@ async def test_encodes_tool_result_message() -> None:
     ]
 
 
-async def test_malformed_stream_raises_bad_response() -> None:
+async def test_malformed_stream_raises_malformed_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"{not-json}\n")
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.BAD_RESPONSE
+    assert exc.value.code is LLMErrorCode.MALFORMED_RESPONSE
 
 
-async def test_http_error_raises_unavailable() -> None:
+async def test_http_error_raises_provider_unavailable() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, content=b"boom")
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.UNAVAILABLE
+    assert exc.value.code is LLMErrorCode.PROVIDER_UNAVAILABLE
 
 
-async def test_transport_error_raises_unavailable() -> None:
+async def test_transport_error_raises_transport_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("no route")
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.UNAVAILABLE
+    assert exc.value.code is LLMErrorCode.TRANSPORT
 
 
-async def test_error_field_raises_unavailable() -> None:
+async def test_error_field_raises_provider_unavailable() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=_ndjson({"error": "model not found"}))
 
     with pytest.raises(LLMProviderError) as exc:
         await _collect(_provider(handler))
 
-    assert exc.value.code is LLMErrorCode.UNAVAILABLE
+    assert exc.value.code is LLMErrorCode.PROVIDER_UNAVAILABLE
 
 
 def test_empty_model_is_rejected() -> None:

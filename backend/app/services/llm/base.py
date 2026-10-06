@@ -1,13 +1,44 @@
-"""Provider-agnostic LLM contract used by the agent.
+"""Canonical, provider-neutral LLM streaming contract used by the agent.
 
 The agent depends only on the types in this module and on :class:`LLMProvider`.
 Concrete providers (local Ollama, external OpenAI-compatible API) live in their
 own adapters and are built per request by a factory.
 
-A provider turns its native streaming protocol into a flat sequence of
-:data:`LLMStreamEvent` values: incremental text and/or complete tool calls. The
-agent accumulates those events to decide whether to execute tools and call the
-model again.
+Canonical events
+----------------
+
+A provider's :meth:`LLMProvider.stream` is an async iterator yielding exactly two
+kinds of canonical events:
+
+* :class:`TextDelta` -- incremental assistant text, emitted as soon as it is
+  available;
+* :class:`ToolCall` -- a **complete** tool call (id, name, fully parsed
+  arguments), never a partial fragment.
+
+Completion and errors
+---------------------
+
+* **Stream completion** is the normal termination of the async iterator. There is
+  no completion event.
+* **Errors** are raised as :class:`~app.services.llm.errors.LLMProviderError`
+  (never yielded), carrying a stable code and a user-safe message. The agent
+  must not depend on provider-specific exception types.
+
+Ordering guarantees
+-------------------
+
+Only these are guaranteed:
+
+* every emitted :class:`ToolCall` is complete;
+* all events are emitted before the iterator terminates.
+
+The **relative order of text and tool calls is not guaranteed** and differs
+between providers (an adapter may emit tool calls inline as they arrive, or
+buffer them and emit them after the text). Consumers must accumulate the stream,
+collect tool calls, and act only once the iterator is exhausted.
+
+Conversely, an adapter must not assume text and tool calls arrive in any
+particular order from its provider, nor with any particular chunking strategy.
 """
 
 from __future__ import annotations
@@ -61,7 +92,7 @@ class LLMMessage:
 
 @dataclass(frozen=True)
 class TextDelta:
-    """Incremental text produced by the model."""
+    """Incremental assistant text."""
 
     text: str
 
@@ -69,33 +100,12 @@ class TextDelta:
 LLMStreamEvent = TextDelta | ToolCall
 
 
-class LLMErrorCode(StrEnum):
-    """Stable, provider-agnostic error codes surfaced to the agent."""
-
-    INVALID_CONFIG = "INVALID_PROVIDER_CONFIG"
-    UNAVAILABLE = "PROVIDER_UNAVAILABLE"
-    BAD_RESPONSE = "PROVIDER_BAD_RESPONSE"
-
-
-class LLMProviderError(Exception):
-    """Provider-agnostic failure with a stable, machine-readable code.
-
-    ``message`` must be safe to surface: adapters never include credentials,
-    request bodies or raw provider payloads in it.
-    """
-
-    def __init__(self, code: LLMErrorCode, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-
 class LLMProvider(ABC):
     """A single LLM backend bound to one configuration for one request.
 
-    Implementations translate the provider's native streaming protocol into
-    :data:`LLMStreamEvent` values and must never expose credentials in errors or
-    logs.
+    Implementations translate the provider's native streaming protocol into the
+    canonical events documented at module level, and must never expose
+    credentials in errors or logs.
     """
 
     name: ClassVar[str] = ""
@@ -110,9 +120,8 @@ class LLMProvider(ABC):
     ) -> AsyncIterator[LLMStreamEvent]:
         """Stream the model's reply for ``messages``.
 
-        Yields :class:`TextDelta` for incremental text and :class:`ToolCall` for
-        each complete tool call the model requests. Raises
-        :class:`LLMProviderError` on a normalized failure.
+        Yields :class:`TextDelta` and complete :class:`ToolCall` events; raises
+        :class:`~app.services.llm.errors.LLMProviderError` on failure.
         """
         raise NotImplementedError
 

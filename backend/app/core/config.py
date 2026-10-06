@@ -19,11 +19,15 @@ by the client per request and is never persisted on the backend.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILE = PROJECT_ROOT / ".env"
 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
@@ -31,14 +35,15 @@ DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 class Settings(BaseSettings):
     """Validated, environment-driven application settings.
 
-    ``JA_CLIENT_`` is the environment variable prefix; ``.env`` (then
-    ``../.env``) is loaded as a fallback, with real environment variables
-    taking precedence.
+    ``JA_CLIENT_`` is the environment variable prefix. Values are read from real
+    environment variables first, then from a single canonical ``.env`` at the
+    repository root (anchored to the project, independent of the working
+    directory), then from field defaults.
     """
 
     model_config = SettingsConfigDict(
         env_prefix="JA_CLIENT_",
-        env_file=(".env", "../.env"),
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )

@@ -3,16 +3,15 @@ from collections.abc import AsyncIterator, Sequence
 import pytest
 
 from app.services.llm.base import (
-    LLMErrorCode,
     LLMMessage,
     LLMProvider,
-    LLMProviderError,
     LLMRole,
     LLMStreamEvent,
     TextDelta,
     ToolCall,
     ToolDefinition,
 )
+from app.services.llm.errors import LLMErrorCode, LLMProviderError
 
 
 class FakeProvider(LLMProvider):
@@ -64,9 +63,9 @@ def test_message_defaults() -> None:
 
 
 def test_provider_error_carries_code_and_message() -> None:
-    error = LLMProviderError(LLMErrorCode.UNAVAILABLE, "provider is down")
+    error = LLMProviderError(LLMErrorCode.PROVIDER_UNAVAILABLE, message="provider is down")
 
-    assert error.code is LLMErrorCode.UNAVAILABLE
+    assert error.code is LLMErrorCode.PROVIDER_UNAVAILABLE
     assert error.message == "provider is down"
     assert str(error) == "provider is down"
 
