@@ -8,6 +8,7 @@ only serializes these; it contains no orchestration logic.
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -98,7 +99,7 @@ class ChatService:
             )
             agent = Agent(provider, self._mcp)
             async for event in agent.run(
-                self._build_messages(request), temperature=request.temperature
+                await self._build_messages(request), temperature=request.temperature
             ):
                 yield _to_chat_event(event)
         except (LLMProviderError, AgentError) as exc:
@@ -127,12 +128,82 @@ class ChatService:
                 int((time.perf_counter() - started) * 1000),
             )
 
-    def _build_messages(self, request: ChatRequest) -> list[LLMMessage]:
+    async def _build_messages(self, request: ChatRequest) -> list[LLMMessage]:
         messages = [_to_message(message) for message in request.messages]
         prompt = self._settings.system_prompt.strip()
+        context = await self._schema_context()
+        if context:
+            prompt = f"{prompt}\n{context}".strip()
         if prompt:
             messages.insert(0, LLMMessage(role=LLMRole.SYSTEM, content=prompt))
         return messages
+
+    async def _schema_context(self) -> str:
+        """Best-effort schema summary injected into the system prompt.
+
+        Weak local models often skip discovery and query unqualified names, so we
+        give them the real table names up front. If the database is small we list
+        every schema-qualified table; if it is large we list only the schemas and
+        let the model drill down, to keep the prompt bounded.
+        """
+        listing = await self._list_tables()
+        if listing is None:
+            return ""
+        names, truncated = listing
+        if not truncated:
+            if not names:
+                return ""
+            return "Available tables (always use schema-qualified names): " + ", ".join(names) + "."
+        schemas = await self._list_schemas()
+        if not schemas:
+            return ""
+        return (
+            "The database has many tables; available schemas: "
+            + ", ".join(schemas)
+            + ". Use db_list_tables and db_describe_table to inspect them before querying."
+        )
+
+    async def _list_tables(self) -> tuple[list[str], bool] | None:
+        payload = await self._call_json("db_list_tables", {"page_size": 200})
+        if payload is None:
+            return None
+        tables = payload.get("tables")
+        if not isinstance(tables, list):
+            return None
+        names = [
+            f"{table['schema_name']}.{table['name']}"
+            for table in tables
+            if isinstance(table, dict)
+            and isinstance(table.get("schema_name"), str)
+            and isinstance(table.get("name"), str)
+        ]
+        return names, payload.get("next_cursor") is not None
+
+    async def _list_schemas(self) -> list[str]:
+        payload = await self._call_json("db_list_schemas", {})
+        if payload is None:
+            return []
+        schemas = payload.get("schemas")
+        if not isinstance(schemas, list):
+            return []
+        return [
+            schema["name"]
+            for schema in schemas
+            if isinstance(schema, dict) and isinstance(schema.get("name"), str)
+        ]
+
+    async def _call_json(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            result = await self._mcp.call_tool(name, arguments)
+        except MCPError:
+            return None
+        if result.is_error:
+            return None
+        try:
+            payload = json.loads(result.content)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
 
 
 def _to_message(message: ChatMessage) -> LLMMessage:
