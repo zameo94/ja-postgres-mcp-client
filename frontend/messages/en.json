@@ -9,9 +9,10 @@
     "send": "Send",
     "stop": "Stop",
     "openSettings": "Settings",
-    "toolRunning": "Running {name}...",
-    "toolDone": "Used {name}",
-    "toolError": "Tool {name} failed"
+    "thinking": "Thinking...",
+    "toolRunning": "Querying the database...",
+    "toolDone": "Query complete",
+    "toolError": "Query failed"
   },
   "settings": {
     "title": "Settings",

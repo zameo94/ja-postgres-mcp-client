@@ -32,6 +32,7 @@ export function Composer({
     >
       <textarea
         rows={1}
+        autoFocus
         value={value}
         disabled={isStreaming}
         aria-label={t("inputPlaceholder")}
