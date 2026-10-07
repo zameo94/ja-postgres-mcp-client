@@ -34,6 +34,11 @@ from app.services.mcp.base import MCPClient, MCPError
 logger = logging.getLogger(__name__)
 
 _TURN_IDS = itertools.count(1)
+# Schema context budget: columns are injected only for small schemas, to bound
+# the prompt size and the number of extra MCP calls per turn.
+_MAX_DESCRIBED_RELATIONS = 20
+_MAX_COLUMNS_PER_RELATION = 30
+_MAX_SCHEMA_CONTEXT_CHARS = 4000
 
 INTERNAL_ERROR: dict[str, str] = {
     "code": LLMErrorCode.INTERNAL.value,
@@ -141,43 +146,74 @@ class ChatService:
     async def _schema_context(self) -> str:
         """Best-effort schema summary injected into the system prompt.
 
-        Weak local models often skip discovery and query unqualified names, so we
-        give them the real table names up front. If the database is small we list
-        every schema-qualified table; if it is large we list only the schemas and
-        let the model drill down, to keep the prompt bounded.
+        Weak local models often skip discovery and guess column names, so we give
+        them the real relations and columns up front. If the database is small we
+        describe every relation; if it is large we list only the schemas and let
+        the model drill down, to keep the prompt bounded.
         """
         listing = await self._list_tables()
         if listing is None:
             return ""
-        names, truncated = listing
-        if not truncated:
-            if not names:
+        tables, truncated = listing
+        if truncated:
+            schemas = await self._list_schemas()
+            if not schemas:
                 return ""
-            return "Available tables (always use schema-qualified names): " + ", ".join(names) + "."
-        schemas = await self._list_schemas()
-        if not schemas:
+            return (
+                "The database has many tables; available schemas: "
+                + ", ".join(schemas)
+                + ". Use db_list_tables and db_describe_table to inspect them before querying."
+            )
+        if not tables:
             return ""
+        if len(tables) <= _MAX_DESCRIBED_RELATIONS:
+            described = await self._describe_tables(tables)
+            if described:
+                context = (
+                    "Available relations (always use schema-qualified names and only "
+                    "these columns): " + "; ".join(described) + "."
+                )
+                if len(context) <= _MAX_SCHEMA_CONTEXT_CHARS:
+                    return context
         return (
-            "The database has many tables; available schemas: "
-            + ", ".join(schemas)
-            + ". Use db_list_tables and db_describe_table to inspect them before querying."
+            "Available tables (always use schema-qualified names): "
+            + ", ".join(f"{schema}.{name}" for schema, name in tables)
+            + ". Use db_describe_table to see their columns."
         )
 
-    async def _list_tables(self) -> tuple[list[str], bool] | None:
+    async def _list_tables(self) -> tuple[list[tuple[str, str]], bool] | None:
         payload = await self._call_json("db_list_tables", {"page_size": 200})
         if payload is None:
             return None
         tables = payload.get("tables")
         if not isinstance(tables, list):
             return None
-        names = [
-            f"{table['schema_name']}.{table['name']}"
+        pairs = [
+            (table["schema_name"], table["name"])
             for table in tables
             if isinstance(table, dict)
             and isinstance(table.get("schema_name"), str)
             and isinstance(table.get("name"), str)
         ]
-        return names, payload.get("next_cursor") is not None
+        return pairs, payload.get("next_cursor") is not None
+
+    async def _describe_tables(self, tables: list[tuple[str, str]]) -> list[str]:
+        described: list[str] = []
+        for schema, name in tables:
+            payload = await self._call_json("db_describe_table", {"schema": schema, "table": name})
+            if payload is None:
+                continue
+            columns = payload.get("columns")
+            if not isinstance(columns, list):
+                continue
+            column_names = [
+                column["name"]
+                for column in columns
+                if isinstance(column, dict) and isinstance(column.get("name"), str)
+            ][:_MAX_COLUMNS_PER_RELATION]
+            if column_names:
+                described.append(f"{schema}.{name}({', '.join(column_names)})")
+        return described
 
     async def _list_schemas(self) -> list[str]:
         payload = await self._call_json("db_list_schemas", {})

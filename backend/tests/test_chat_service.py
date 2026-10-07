@@ -137,7 +137,10 @@ async def test_system_prompt_includes_schema_when_small(
                         "row_count": 1,
                     }
                 )
-            )
+            ),
+            "db_describe_table": MCPToolResult(
+                content=json.dumps({"columns": [{"name": "id"}, {"name": "name"}]})
+            ),
         }
     )
     service = ChatService(_settings(monkeypatch), mcp)
@@ -145,7 +148,7 @@ async def test_system_prompt_includes_schema_when_small(
     _ = [event async for event in service.stream(_request())]
 
     system = provider.calls[0][0]
-    assert "demo.customers" in system.content
+    assert "demo.customers(id, name)" in system.content
 
 
 async def test_system_prompt_lists_schemas_when_large(
