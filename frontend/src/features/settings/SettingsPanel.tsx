@@ -121,8 +121,8 @@ export function SettingsPanel({
             onChange={(event) => setProvider(event.target.value as ProviderId)}
             className="w-full rounded-md border border-slate-300 px-3 py-2"
           >
-            <option value="ollama">{t("providerOllama")}</option>
             <option value="external_api">{t("providerExternal")}</option>
+            <option value="ollama">{t("providerOllama")}</option>
           </select>
         </label>
 

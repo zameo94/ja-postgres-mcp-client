@@ -11,7 +11,9 @@ import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { useChat } from "./useChat";
 
-const DEFAULT_PROVIDER: ProviderConfig = { provider: "ollama", model: "llama3.1" };
+// No provider is configured by default: the user sets it in Settings. External
+// API is listed first because small local models are weak at MCP tool calling.
+const DEFAULT_PROVIDER: ProviderConfig = { provider: "external_api", model: "" };
 
 export function ChatPage() {
   const t = useTranslations("chat");

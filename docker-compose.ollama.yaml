@@ -1,0 +1,45 @@
+# Ollama overlay: run a local Ollama container for the client stack.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml up --build
+#
+# The backend is pointed at the container Ollama (http://ollama:11434). If
+# OLLAMA_MODEL is set it is pulled on first startup; otherwise the container just
+# serves and you pull a model manually, e.g.:
+#   docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml exec ollama ollama pull <model>
+#
+# Published on host OLLAMA_HOST_PORT (default 11435) so it does not clash with a
+# native Ollama on 11434.
+
+services:
+  backend:
+    environment:
+      JA_CLIENT_OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        if [ -n "$$OLLAMA_MODEL" ]; then ollama pull "$$OLLAMA_MODEL"; fi
+        wait
+    ports:
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11435}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test:
+        ["CMD-SHELL", "if [ -n \"$$OLLAMA_MODEL\" ]; then ollama list | grep -q \"$$OLLAMA_MODEL\"; else ollama list >/dev/null 2>&1; fi || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+volumes:
+  ollama-data:

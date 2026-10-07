@@ -132,6 +132,10 @@ export function useChat(
     async (text: string): Promise<boolean> => {
       const question = text.trim();
       if (!question || sendingRef.current) return false;
+      if (!provider.model.trim() || (provider.provider === "external_api" && !provider.base_url)) {
+        setError({ code: "missing_config", message: "Set up the provider in Settings first." });
+        return false;
+      }
       sendingRef.current = true;
       try {
         let request = provider;

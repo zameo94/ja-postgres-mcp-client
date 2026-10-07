@@ -50,6 +50,7 @@
     "mcp_connection_error": "The database service could not be reached.",
     "mcp_tool_error": "The database service failed to run the tool.",
     "tool_loop_exceeded": "The assistant used too many tools. Please try again.",
+    "missing_config": "Set up the provider in Settings first.",
     "missing_api_key": "No API key is configured. Add one in Settings.",
     "secure_storage_unavailable": "This browser cannot store the API key securely.",
     "api_key_unreadable": "The saved API key could not be read. Enter it again in Settings.",
