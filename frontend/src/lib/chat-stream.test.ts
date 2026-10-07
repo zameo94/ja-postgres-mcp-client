@@ -4,7 +4,7 @@ import { streamChat, type ChatRequestPayload } from "@/lib/chat-stream";
 
 const payload: ChatRequestPayload = {
   messages: [{ role: "user", content: "hi" }],
-  provider: { provider: "ollama", model: "m" },
+  provider: "ollama",
 };
 
 function sseResponse(chunks: string[]): Response {

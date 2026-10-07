@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     mcp_tool_timeout: float = Field(default=30.0, gt=0)
 
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    ollama_model: str | None = None
+
+    external_base_url: str | None = None
+    external_model: str | None = None
+    external_api_key: str | None = None
+
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     database_schema: str | None = Field(default=None, validation_alias="JA_CLIENT_SCHEMA")
 
@@ -97,6 +103,16 @@ class Settings(BaseSettings):
         parts = urlsplit(value)
         if parts.scheme not in {"http", "https"} or not parts.netloc:
             raise ValueError(f"{info.field_name} must be an absolute http(s) URL")
+        return value
+
+    @field_validator("external_base_url")
+    @classmethod
+    def _validate_optional_http_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        parts = urlsplit(value)
+        if parts.scheme not in {"http", "https"} or not parts.netloc:
+            raise ValueError("external_base_url must be an absolute http(s) URL")
         return value
 
 

@@ -73,12 +73,13 @@ class ChatService:
     async def stream(self, request: ChatRequest) -> AsyncIterator[ChatEvent]:
         try:
             provider = await build_provider(
-                request.provider.provider,
-                model=request.provider.model,
+                request.provider,
                 ollama_base_url=self._settings.ollama_base_url,
+                ollama_model=self._settings.ollama_model,
+                external_base_url=self._settings.external_base_url,
+                external_model=self._settings.external_model,
+                external_api_key=self._settings.external_api_key,
                 allow_insecure=self._settings.is_development,
-                base_url=request.provider.base_url,
-                api_key=request.provider.api_key,
             )
         except LLMProviderError as exc:
             logger.warning("provider configuration rejected: code=%s", exc.code.value)
@@ -91,16 +92,11 @@ class ChatService:
 
         turn = next(_TURN_IDS)
         started = time.perf_counter()
-        logger.info(
-            "chat turn started: turn=%d provider=%s model=%s",
-            turn,
-            request.provider.provider,
-            request.provider.model,
-        )
+        logger.info("chat turn started: turn=%d provider=%s", turn, request.provider)
         try:
             yield ChatEvent(
                 ChatEventType.MESSAGE_START,
-                {"provider": request.provider.provider, "model": request.provider.model},
+                {"provider": request.provider},
             )
             agent = Agent(provider, self._mcp)
             async for event in agent.run(

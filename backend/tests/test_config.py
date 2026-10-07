@@ -103,6 +103,27 @@ def test_schema_defaults_to_none_and_reads_env(monkeypatch: pytest.MonkeyPatch) 
     assert Settings(_env_file=None).database_schema == "demo"
 
 
+def test_external_provider_config_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", MCP_URL)
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_MODEL", "gpt")
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_API_KEY", "k")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.external_base_url == "https://api.example.com/v1"
+    assert settings.external_model == "gpt"
+    assert settings.external_api_key == "k"
+
+
+def test_external_base_url_is_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", MCP_URL)
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_BASE_URL", "not-a-url")
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
 def test_log_level_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", MCP_URL)
     monkeypatch.setenv("JA_CLIENT_LOG_LEVEL", "debug")

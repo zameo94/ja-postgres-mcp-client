@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from app.core.config import Settings
-from app.schemas.chat import ChatMessage, ChatRequest, ProviderConfig
+from app.schemas.chat import ChatMessage, ChatRequest
 from app.services.agent.errors import AgentError, AgentErrorCode
 from app.services.chat import ChatService
 from app.services.llm.base import (
@@ -95,12 +95,13 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     return Settings(_env_file=None)
 
 
-def _request(**provider_kwargs: Any) -> ChatRequest:
-    provider = ProviderConfig(provider="ollama", model="test-model", **provider_kwargs)
-    return ChatRequest(
-        messages=[ChatMessage(role="user", content="hi")],
-        provider=provider,
-    )
+def _request(**overrides: Any) -> ChatRequest:
+    base: dict[str, Any] = {
+        "messages": [ChatMessage(role="user", content="hi")],
+        "provider": "ollama",
+    }
+    base.update(overrides)
+    return ChatRequest(**base)
 
 
 def _use_provider(monkeypatch: pytest.MonkeyPatch, provider: LLMProvider) -> None:
@@ -335,15 +336,11 @@ async def test_logs_do_not_contain_the_api_key(
 ) -> None:
     provider = ScriptedProvider(error=LLMProviderError(LLMErrorCode.AUTHENTICATION))
     _use_provider(monkeypatch, provider)
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_API_KEY", "sk-super-secret")
     service = ChatService(_settings(monkeypatch), FakeMCP())
     request = ChatRequest(
         messages=[ChatMessage(role="user", content="hi")],
-        provider=ProviderConfig(
-            provider="external_api",
-            model="m",
-            base_url="https://api.example.com/v1",
-            api_key="sk-super-secret",
-        ),
+        provider="external_api",
     )
 
     with caplog.at_level(logging.DEBUG):
@@ -358,15 +355,11 @@ async def test_logs_turn_lifecycle_without_secrets(
 ) -> None:
     provider = ScriptedProvider([[TextDelta("ok")]])
     _use_provider(monkeypatch, provider)
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_API_KEY", "sk-super-secret")
     service = ChatService(_settings(monkeypatch), FakeMCP())
     request = ChatRequest(
         messages=[ChatMessage(role="user", content="hi")],
-        provider=ProviderConfig(
-            provider="external_api",
-            model="m",
-            base_url="https://api.example.com/v1",
-            api_key="sk-super-secret",
-        ),
+        provider="external_api",
     )
 
     with caplog.at_level(logging.INFO):
@@ -384,16 +377,14 @@ async def test_ssrf_rejection_maps_to_invalid_config(
     async def reject(url: str, *, allow_insecure: bool) -> str:
         raise LLMProviderError(LLMErrorCode.INVALID_CONFIG)
 
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_BASE_URL", "https://evil.example/v1")
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_MODEL", "m")
+    monkeypatch.setenv("JA_CLIENT_EXTERNAL_API_KEY", "k")
     monkeypatch.setattr("app.services.llm.factory.resolve_and_validate_provider_base_url", reject)
     service = ChatService(_settings(monkeypatch), FakeMCP())
     request = ChatRequest(
         messages=[ChatMessage(role="user", content="hi")],
-        provider=ProviderConfig(
-            provider="external_api",
-            model="m",
-            base_url="https://evil.example/v1",
-            api_key="k",
-        ),
+        provider="external_api",
     )
 
     events = [event async for event in service.stream(request)]

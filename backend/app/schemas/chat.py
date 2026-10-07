@@ -1,7 +1,9 @@
 """Chat endpoint request schema.
 
 The backend is stateless: the client sends the full conversation so far, ending
-with a user message, plus the provider it selected for this turn.
+with a user message, plus the provider it selected for this turn. The provider
+connection details (base URL, model, API key) are **server configuration**
+(environment), never sent by the browser.
 """
 
 from __future__ import annotations
@@ -28,29 +30,9 @@ class ChatMessage(BaseModel):
         return value
 
 
-class ProviderConfig(BaseModel):
-    provider: ProviderId
-    model: str = Field(min_length=1, max_length=200)
-    base_url: str | None = None
-    api_key: str | None = None
-
-    @field_validator("model")
-    @classmethod
-    def _reject_control_characters(cls, value: str) -> str:
-        if any(ord(character) < 32 for character in value):
-            raise ValueError("model must not contain control characters")
-        return value
-
-    @model_validator(mode="after")
-    def _require_external_credentials(self) -> ProviderConfig:
-        if self.provider == "external_api" and (not self.base_url or not self.api_key):
-            raise ValueError("base_url and api_key are required for the external provider")
-        return self
-
-
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=MAX_MESSAGES)
-    provider: ProviderConfig
+    provider: ProviderId
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
     @model_validator(mode="after")

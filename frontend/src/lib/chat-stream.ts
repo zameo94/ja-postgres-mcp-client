@@ -1,9 +1,9 @@
 import { parseSseChunk } from "./sse";
-import type { ChatError, ChatHistoryMessage, ProviderConfig } from "./types";
+import type { ChatError, ChatHistoryMessage, ProviderId } from "./types";
 
 export interface ChatRequestPayload {
   messages: ChatHistoryMessage[];
-  provider: ProviderConfig;
+  provider: ProviderId;
   temperature?: number;
 }
 

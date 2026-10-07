@@ -82,11 +82,6 @@ Frontend:
 7. Never claim tests pass if they were not executed.
 8. Keep `README.md` in sync when user-facing behavior changes.
 
-At the end of every task report: what was implemented; files created/modified;
-tests written; tests executed (NO); Docker build (NO); architectural notes;
-remaining work; risks/assumptions; suggested next branch; suggested commit; a
-short summary of the current architecture/state.
-
 ## Git rules
 
 - **Never** run `git commit`, `git add`, `git status` or `git push`. The
@@ -117,8 +112,9 @@ short summary of the current architecture/state.
   exactly one provider per request.
 - The interface covers what the agent actually needs: chat, streaming,
   tool/function calling, configuration validation and normalized errors.
-- Provider/model/base URL/API key are supplied by the client **per request**;
-  the backend keeps no provider state.
+- The browser selects the provider **per request**; connection details (base URL,
+  model, API key) come from **server configuration**, and the backend keeps no
+  provider state.
 - A **server-side system prompt** (`JA_CLIENT_SYSTEM_PROMPT`, with a built-in
   default) is prepended as a `system` message to every chat turn. It is
   operator-controlled and not user-editable.
@@ -130,11 +126,10 @@ short summary of the current architecture/state.
 - **Error model** lives in `app/services/llm/errors.py`: stable wire codes
   (`LLMErrorCode`), explicit user-facing messages, and an internal `detail` that
   is never serialized (`to_dict()` exposes `code` + `message` only).
-- **SSRF policy** lives in `app/services/llm/url_policy.py`; every user-supplied
-  provider base URL must pass through it before reaching `httpx`. The future
-  settings/chat endpoint must build the provider through this validation and must
-  never hand an arbitrary URL to the client library. DNS-rebinding hardening is
-  deferred to that endpoint (see module docstring).
+- **SSRF policy** lives in `app/services/llm/url_policy.py`; the provider factory
+  (`app/services/llm/factory.py`) validates every user-supplied base URL (scheme,
+  literal ranges and DNS-resolved addresses) before it reaches `httpx`. Never hand
+  an arbitrary URL to the client library.
 
 ## Agent
 
@@ -162,18 +157,10 @@ short summary of the current architecture/state.
 - Cross-turn replay is **text-only**: previous assistant tool calls and tool
   results are not sent back to the model (stateless design). Tracked as a README
   MVP limitation.
-- The only persisted state is the user's **provider settings**, stored in the
-  browser:
-  - provider selection, model, base URL: `localStorage`.
-  - API key: **encrypted** with AES-GCM (Web Crypto); ciphertext in
-    `localStorage`, a non-exportable `CryptoKey` in IndexedDB; decrypt only when
-    sending the credential; **never** plaintext, **never** logged, **never**
-    returned by ordinary API responses.
-  - If the browser lacks the required crypto/IndexedDB support, fail safely and
-    clearly; never fall back to plaintext storage.
-- **Documented limitation**: client-side encryption does not protect against XSS
-  or malicious same-origin JavaScript. It only avoids plaintext-at-rest and
-  accidental exposure through browser storage.
+- The only persisted state is the **selected provider** (`localStorage`). The
+  model, base URL and API key are **server configuration** (environment), never
+  stored in the browser and never returned by the API. Keeping the credential
+  server-side means a browser-side XSS cannot exfiltrate it.
 
 ## SSE contract
 
@@ -273,28 +260,6 @@ frontend/
 README.md
 AGENTS.md
 ```
-
-## Roadmap
-
-Built one step at a time (order may change after each review):
-
-1. Project foundation (repository skeleton + tooling).
-2. Centralized configuration and environment handling.
-3. FastAPI application boundary and health endpoint.
-4. React shell and basic chat page.
-5. LLM provider interface.
-6. Ollama adapter.
-7. External OpenAI-compatible adapter.
-8. MCP client.
-9. Agent orchestration.
-10. SSE contract and backend streaming endpoint.
-11. Frontend SSE client and incremental rendering.
-12. Options/settings UI.
-13. Ollama development setup (documentation only; agents do not build).
-14. Security and configuration hardening.
-15. Error handling and observability cleanup.
-16. Test coverage.
-17. Documentation and developer-experience cleanup.
 
 ## Versioning
 

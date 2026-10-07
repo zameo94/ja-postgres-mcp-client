@@ -5,11 +5,8 @@ vi.mock("@/lib/chat-stream", () => ({ streamChat: vi.fn() }));
 
 import { useChat } from "@/features/chat/useChat";
 import { streamChat } from "@/lib/chat-stream";
-import { ApiKeyMissingError } from "@/lib/provider-settings";
-import type { ProviderConfig } from "@/lib/types";
 
 const streamMock = vi.mocked(streamChat);
-const OLLAMA: ProviderConfig = { provider: "ollama", model: "m" };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -24,7 +21,7 @@ describe("useChat", () => {
           release = resolve;
         }),
     );
-    const { result } = renderHook(() => useChat(OLLAMA, async () => "key"));
+    const { result } = renderHook(() => useChat("ollama"));
 
     let second: boolean | undefined;
     await act(async () => {
@@ -39,32 +36,12 @@ describe("useChat", () => {
     await act(async () => release());
   });
 
-  it("reports a missing api key for the external provider", async () => {
-    const { result } = renderHook(() =>
-      useChat(
-        { provider: "external_api", model: "m", base_url: "https://api.example.com/v1" },
-        async () => {
-          throw new ApiKeyMissingError();
-        },
-      ),
-    );
-
-    let accepted: boolean | undefined;
-    await act(async () => {
-      accepted = await result.current.send("hi");
-    });
-
-    expect(accepted).toBe(false);
-    expect(result.current.error?.code).toBe("missing_api_key");
-    expect(streamMock).not.toHaveBeenCalled();
-  });
-
   it("marks running tools as error when the stream fails", async () => {
     streamMock.mockImplementation(async (_payload, handlers) => {
       handlers.onToolCall?.({ id: "c1", name: "db_health", arguments: {} });
       handlers.onError?.({ code: "rate_limited", message: "slow" });
     });
-    const { result } = renderHook(() => useChat(OLLAMA, async () => "key"));
+    const { result } = renderHook(() => useChat("ollama"));
 
     await act(async () => {
       await result.current.send("hi");
@@ -81,7 +58,7 @@ describe("useChat", () => {
       signal = providedSignal;
       return new Promise<void>(() => undefined);
     });
-    const { result, unmount } = renderHook(() => useChat(OLLAMA, async () => "key"));
+    const { result, unmount } = renderHook(() => useChat("ollama"));
 
     await act(async () => {
       void result.current.send("hi");

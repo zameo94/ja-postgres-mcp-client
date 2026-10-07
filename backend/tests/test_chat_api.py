@@ -55,10 +55,7 @@ def test_chat_streams_sse(monkeypatch: Any) -> None:
 
     response = client.post(
         "/chat",
-        json={
-            "messages": [{"role": "user", "content": "hi"}],
-            "provider": {"provider": "ollama", "model": "m"},
-        },
+        json={"messages": [{"role": "user", "content": "hi"}], "provider": "ollama"},
     )
 
     assert response.status_code == 200
@@ -73,21 +70,18 @@ def test_chat_rejects_empty_messages() -> None:
 
     response = client.post(
         "/chat",
-        json={"messages": [], "provider": {"provider": "ollama", "model": "m"}},
+        json={"messages": [], "provider": "ollama"},
     )
 
     assert response.status_code == 422
 
 
-def test_chat_requires_external_credentials() -> None:
+def test_chat_rejects_unknown_provider() -> None:
     client = TestClient(create_app())
 
     response = client.post(
         "/chat",
-        json={
-            "messages": [{"role": "user", "content": "hi"}],
-            "provider": {"provider": "external_api", "model": "m"},
-        },
+        json={"messages": [{"role": "user", "content": "hi"}], "provider": "nope"},
     )
 
     assert response.status_code == 422
@@ -103,21 +97,7 @@ def test_chat_rejects_assistant_as_last_message() -> None:
                 {"role": "user", "content": "hi"},
                 {"role": "assistant", "content": "hello"},
             ],
-            "provider": {"provider": "ollama", "model": "m"},
-        },
-    )
-
-    assert response.status_code == 422
-
-
-def test_chat_rejects_control_characters_in_model() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/chat",
-        json={
-            "messages": [{"role": "user", "content": "hi"}],
-            "provider": {"provider": "ollama", "model": "bad\nmodel"},
+            "provider": "ollama",
         },
     )
 
@@ -137,10 +117,7 @@ def test_chat_endpoint_wires_the_real_lifespan(monkeypatch: Any) -> None:
 
             response = client.post(
                 "/chat",
-                json={
-                    "messages": [{"role": "user", "content": "hi"}],
-                    "provider": {"provider": "ollama", "model": "m"},
-                },
+                json={"messages": [{"role": "user", "content": "hi"}], "provider": "ollama"},
             )
 
             assert response.status_code == 200

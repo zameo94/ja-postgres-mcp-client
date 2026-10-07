@@ -3,24 +3,24 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
-import { loadProviderSettings, requireApiKey } from "@/lib/provider-settings";
-import type { ChatError, ProviderConfig } from "@/lib/types";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
+import { loadProvider } from "@/lib/provider-settings";
+import type { ChatError, ProviderId } from "@/lib/types";
 
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { useChat } from "./useChat";
 
-// No provider is configured by default: the user sets it in Settings. External
-// API is listed first because small local models are weak at MCP tool calling.
-const DEFAULT_PROVIDER: ProviderConfig = { provider: "external_api", model: "" };
+// External API is listed first because small local models are weak at MCP tool
+// calling. Connection details (base URL, model, API key) are server config.
+const DEFAULT_PROVIDER: ProviderId = "external_api";
 
 export function ChatPage() {
   const t = useTranslations("chat");
   const tErrors = useTranslations("errors");
-  const [provider, setProvider] = useState<ProviderConfig>(DEFAULT_PROVIDER);
+  const [provider, setProvider] = useState<ProviderId>(DEFAULT_PROVIDER);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { messages, isStreaming, error, send, stop } = useChat(provider, requireApiKey);
+  const { messages, isStreaming, error, send, stop } = useChat(provider);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,14 +28,8 @@ export function ChatPage() {
   }, [messages]);
 
   useEffect(() => {
-    const stored = loadProviderSettings();
-    if (stored) {
-      setProvider({
-        provider: stored.provider,
-        model: stored.model,
-        base_url: stored.base_url || undefined,
-      });
-    }
+    const stored = loadProvider();
+    if (stored) setProvider(stored);
   }, []);
 
   return (

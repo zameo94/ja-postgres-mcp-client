@@ -3,12 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { streamChat } from "@/lib/chat-stream";
-import {
-  ApiKeyMissingError,
-  ApiKeyUnavailableError,
-  ApiKeyUnreadableError,
-} from "@/lib/provider-settings";
-import type { ChatError, ChatHistoryMessage, ProviderConfig, UiMessage } from "@/lib/types";
+import type { ChatError, ChatHistoryMessage, ProviderId, UiMessage } from "@/lib/types";
 
 export interface UseChatResult {
   messages: UiMessage[];
@@ -24,23 +19,7 @@ function newId(prefix: string): string {
   return `${prefix}-${idCounter}`;
 }
 
-function mapApiKeyError(error: unknown): ChatError {
-  if (error instanceof ApiKeyMissingError) {
-    return { code: "missing_api_key", message: "No API key is configured." };
-  }
-  if (error instanceof ApiKeyUnavailableError) {
-    return { code: "secure_storage_unavailable", message: "Secure storage is unavailable." };
-  }
-  if (error instanceof ApiKeyUnreadableError) {
-    return { code: "api_key_unreadable", message: "The saved API key could not be read." };
-  }
-  return { code: "internal_error", message: "An unexpected error occurred." };
-}
-
-export function useChat(
-  provider: ProviderConfig,
-  resolveApiKey: () => Promise<string>,
-): UseChatResult {
+export function useChat(provider: ProviderId): UseChatResult {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<ChatError | null>(null);
@@ -50,7 +29,7 @@ export function useChat(
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const startTurn = useCallback(
-    (question: string, request: ProviderConfig): void => {
+    (question: string): void => {
       const history: ChatHistoryMessage[] = messages.map((message) => ({
         role: message.role,
         content: message.content,
@@ -75,7 +54,7 @@ export function useChat(
       };
 
       void streamChat(
-        { messages: [...history, { role: "user", content: question }], provider: request },
+        { messages: [...history, { role: "user", content: question }], provider },
         {
           onToken: (token) =>
             updateAssistant((message) => ({ ...message, content: message.content + token })),
@@ -125,32 +104,18 @@ export function useChat(
         });
       });
     },
-    [messages],
+    [messages, provider],
   );
 
   const send = useCallback(
     async (text: string): Promise<boolean> => {
       const question = text.trim();
       if (!question || sendingRef.current) return false;
-      if (!provider.model.trim() || (provider.provider === "external_api" && !provider.base_url)) {
-        setError({ code: "missing_config", message: "Set up the provider in Settings first." });
-        return false;
-      }
       sendingRef.current = true;
-      try {
-        let request = provider;
-        if (provider.provider === "external_api") {
-          request = { ...provider, api_key: await resolveApiKey() };
-        }
-        startTurn(question, request);
-        return true;
-      } catch (cause) {
-        sendingRef.current = false;
-        setError(mapApiKeyError(cause));
-        return false;
-      }
+      startTurn(question);
+      return true;
     },
-    [provider, resolveApiKey, startTurn],
+    [startTurn],
   );
 
   const stop = useCallback(() => {

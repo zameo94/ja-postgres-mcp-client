@@ -15,10 +15,7 @@ const streamMock = vi.mocked(streamChat);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem(
-    "ja-postgres-mcp-client.provider",
-    JSON.stringify({ provider: "ollama", model: "m", base_url: "" }),
-  );
+  localStorage.setItem("ja-postgres-mcp-client.provider", "ollama");
 });
 
 describe("ChatPage", () => {
@@ -47,6 +44,7 @@ describe("ChatPage", () => {
     await waitFor(() => expect(screen.getByText("Hello")).toBeInTheDocument());
     expect(screen.getByText("hi")).toBeInTheDocument();
     const [request] = streamMock.mock.calls[0];
+    expect(request.provider).toBe("ollama");
     expect(request.messages).toEqual([{ role: "user", content: "hi" }]);
   });
 

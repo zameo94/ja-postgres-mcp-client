@@ -2,13 +2,6 @@ export type ChatRole = "user" | "assistant";
 
 export type ProviderId = "ollama" | "external_api";
 
-export interface ProviderConfig {
-  provider: ProviderId;
-  model: string;
-  base_url?: string;
-  api_key?: string;
-}
-
 export interface ChatHistoryMessage {
   role: ChatRole;
   content: string;
