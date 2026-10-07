@@ -128,6 +128,16 @@ describe("SettingsPanel", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("masks and locks the key input when one is stored", () => {
+    vi.mocked(hasStoredApiKey).mockReturnValue(true);
+    renderPanel({ provider: "external_api", model: "m", base_url: "https://x.example/v1" });
+
+    const input = screen.getByLabelText("apiKey");
+
+    expect(input).toBeDisabled();
+    expect(input).toHaveValue("••••••••••••");
+  });
+
   it("clears a stored key", async () => {
     vi.mocked(hasStoredApiKey).mockReturnValue(true);
     const user = userEvent.setup();
