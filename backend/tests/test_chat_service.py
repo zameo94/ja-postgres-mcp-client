@@ -151,6 +151,35 @@ async def test_system_prompt_includes_schema_when_small(
     assert "demo.customers(id, name)" in system.content
 
 
+async def test_schema_context_uses_configured_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ScriptedProvider([[TextDelta("ok")]])
+    _use_provider(monkeypatch, provider)
+    monkeypatch.setenv("JA_CLIENT_SCHEMA", "demo")
+    mcp = FakeMCP(
+        results={
+            "db_list_tables": MCPToolResult(
+                content=json.dumps(
+                    {
+                        "tables": [{"schema_name": "demo", "name": "customers"}],
+                        "next_cursor": None,
+                        "row_count": 1,
+                    }
+                )
+            ),
+            "db_describe_table": MCPToolResult(content=json.dumps({"columns": [{"name": "id"}]})),
+        }
+    )
+    service = ChatService(_settings(monkeypatch), mcp)
+
+    _ = [event async for event in service.stream(_request())]
+
+    system = provider.calls[0][0]
+    assert "The relevant schema is demo" in system.content
+    assert "demo.customers(id)" in system.content
+
+
 async def test_system_prompt_lists_schemas_when_large(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

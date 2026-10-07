@@ -77,6 +77,7 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    database_schema: str | None = Field(default=None, validation_alias="JA_CLIENT_SCHEMA")
 
     @property
     def is_development(self) -> bool:

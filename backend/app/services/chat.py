@@ -151,21 +151,28 @@ class ChatService:
         describe every relation; if it is large we list only the schemas and let
         the model drill down, to keep the prompt bounded.
         """
-        listing = await self._list_tables()
+        configured = (self._settings.database_schema or "").strip()
+        prefix = f"The relevant schema is {configured}." if configured else ""
+
+        listing = await self._list_tables(configured or None)
         if listing is None:
-            return ""
+            return prefix
         tables, truncated = listing
-        if truncated:
+
+        if truncated and not configured:
             schemas = await self._list_schemas()
             if not schemas:
-                return ""
+                return prefix
             return (
-                "The database has many tables; available schemas: "
+                prefix
+                + " The database has many tables; available schemas: "
                 + ", ".join(schemas)
                 + ". Use db_list_tables and db_describe_table to inspect them before querying."
-            )
+            ).strip()
+
         if not tables:
-            return ""
+            return prefix
+
         if len(tables) <= _MAX_DESCRIBED_RELATIONS:
             described = await self._describe_tables(tables)
             if described:
@@ -173,16 +180,22 @@ class ChatService:
                     "Available relations (always use schema-qualified names and only "
                     "these columns): " + "; ".join(described) + "."
                 )
-                if len(context) <= _MAX_SCHEMA_CONTEXT_CHARS:
-                    return context
+                if len(prefix) + len(context) <= _MAX_SCHEMA_CONTEXT_CHARS:
+                    return f"{prefix} {context}".strip()
         return (
-            "Available tables (always use schema-qualified names): "
+            prefix
+            + " Available tables (always use schema-qualified names): "
             + ", ".join(f"{schema}.{name}" for schema, name in tables)
             + ". Use db_describe_table to see their columns."
-        )
+        ).strip()
 
-    async def _list_tables(self) -> tuple[list[tuple[str, str]], bool] | None:
-        payload = await self._call_json("db_list_tables", {"page_size": 200})
+    async def _list_tables(
+        self, schema: str | None = None
+    ) -> tuple[list[tuple[str, str]], bool] | None:
+        arguments: dict[str, Any] = {"page_size": 200}
+        if schema:
+            arguments["schema"] = schema
+        payload = await self._call_json("db_list_tables", arguments)
         if payload is None:
             return None
         tables = payload.get("tables")

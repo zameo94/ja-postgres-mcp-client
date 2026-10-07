@@ -92,6 +92,17 @@ def test_system_prompt_has_default_and_is_overridable(monkeypatch: pytest.Monkey
     assert Settings(_env_file=None).system_prompt == "custom instructions"
 
 
+def test_schema_defaults_to_none_and_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", MCP_URL)
+    monkeypatch.delenv("JA_CLIENT_SCHEMA", raising=False)
+
+    assert Settings(_env_file=None).database_schema is None
+
+    monkeypatch.setenv("JA_CLIENT_SCHEMA", "demo")
+
+    assert Settings(_env_file=None).database_schema == "demo"
+
+
 def test_log_level_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JA_CLIENT_MCP_SERVER_URL", MCP_URL)
     monkeypatch.setenv("JA_CLIENT_LOG_LEVEL", "debug")
