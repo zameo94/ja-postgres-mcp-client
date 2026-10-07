@@ -10,28 +10,35 @@
 # All published ports are bound to 127.0.0.1 only, so services are not exposed on
 # the LAN (Ollama has no authentication).
 #
-# These ports (8100/3000/11434) clash with a native run: stop the native backend,
-# frontend or Ollama before `docker compose up`.
+# The container Ollama is published on host OLLAMA_HOST_PORT (default 11435) so it
+# does not clash with a native Ollama on 11434; the backend reaches it internally
+# at http://ollama:11434.
 #
-# Ollama models are not downloaded automatically; pull one once, e.g.:
-#   docker compose exec ollama ollama pull llama3.1
+# On first startup the Ollama container pulls OLLAMA_MODEL (default llama3.1) from
+# its env before becoming healthy, so the backend waits for the model. Native
+# backend/frontend (8100/3000) must be stopped before `docker compose up`.
 #
-# Backend and frontend also run natively (poetry / npm) using the root .env;
-# this Compose overrides the URLs to container-internal names. Pin OLLAMA_IMAGE
-# for a reproducible environment.
+# Copy .env.example to .env first (the backend reads .env). Settings like
+# JA_CLIENT_SYSTEM_PROMPT or JA_CLIENT_LOG_LEVEL can then be tuned without
+# rebuilding; the container network URLs below override any native .env values.
 
 services:
   backend:
     build:
       context: ./backend
+    env_file:
+      - .env
     environment:
       JA_CLIENT_ENVIRONMENT: development
+      JA_CLIENT_HOST: 0.0.0.0
+      JA_CLIENT_PORT: "8100"
+      JA_CLIENT_RELOAD: "false"
       JA_CLIENT_MCP_SERVER_URL: http://host.docker.internal:8000/mcp
       JA_CLIENT_OLLAMA_BASE_URL: http://ollama:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:8100:8100"
+      - "127.0.0.1:${BACKEND_PORT:-8100}:8100"
     healthcheck:
       test:
         ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health').read()"]
@@ -40,7 +47,8 @@ services:
       retries: 5
       start_period: 10s
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
 
   frontend:
     build:
@@ -48,17 +56,34 @@ services:
     environment:
       BACKEND_BASE_URL: http://backend:8100
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
 
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
+    # Start the server, pull the configured model once (idempotent), then keep
+    # serving in the foreground. No extra container.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull "$$OLLAMA_MODEL"
+        wait
     ports:
-      - "127.0.0.1:11434:11434"
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11435}:11434"
     volumes:
       - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list | grep -q \"$$OLLAMA_MODEL\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
 
 volumes:
   ollama-data:

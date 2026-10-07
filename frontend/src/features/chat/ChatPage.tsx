@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { loadProviderSettings, requireApiKey } from "@/lib/provider-settings";
 import type { ChatError, ProviderConfig } from "@/lib/types";
@@ -19,6 +19,11 @@ export function ChatPage() {
   const [provider, setProvider] = useState<ProviderConfig>(DEFAULT_PROVIDER);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { messages, isStreaming, error, send, stop } = useChat(provider, requireApiKey);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView?.({ block: "end" });
+  }, [messages]);
 
   useEffect(() => {
     const stored = loadProviderSettings();
@@ -54,7 +59,8 @@ export function ChatPage() {
       )}
 
       <main className="flex-1 overflow-y-auto p-4">
-        <MessageList messages={messages} />
+        <MessageList messages={messages} isStreaming={isStreaming} />
+        <div ref={endRef} />
       </main>
 
       <footer className="border-t border-slate-200 bg-white p-4">

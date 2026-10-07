@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
@@ -86,7 +87,7 @@ class FakeMCP(MCPClient):
         return self._tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        return self._results[name]
+        return self._results.get(name, MCPToolResult(content="{}"))
 
 
 def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
@@ -119,6 +120,71 @@ async def test_streams_text_then_message_end(monkeypatch: pytest.MonkeyPatch) ->
     assert [event.name for event in events] == ["message_start", "token", "token", "message_end"]
     assert events[1].data == {"text": "Hel"}
     assert provider.closed is True
+
+
+async def test_system_prompt_includes_schema_when_small(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ScriptedProvider([[TextDelta("ok")]])
+    _use_provider(monkeypatch, provider)
+    mcp = FakeMCP(
+        results={
+            "db_list_tables": MCPToolResult(
+                content=json.dumps(
+                    {
+                        "tables": [{"schema_name": "demo", "name": "customers"}],
+                        "next_cursor": None,
+                        "row_count": 1,
+                    }
+                )
+            ),
+            "db_describe_table": MCPToolResult(
+                content=json.dumps({"columns": [{"name": "id"}, {"name": "name"}]})
+            ),
+        }
+    )
+    service = ChatService(_settings(monkeypatch), mcp)
+
+    _ = [event async for event in service.stream(_request())]
+
+    system = provider.calls[0][0]
+    assert "demo.customers(id, name)" in system.content
+
+
+async def test_system_prompt_lists_schemas_when_large(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ScriptedProvider([[TextDelta("ok")]])
+    _use_provider(monkeypatch, provider)
+    mcp = FakeMCP(
+        results={
+            "db_list_tables": MCPToolResult(
+                content=json.dumps(
+                    {
+                        "tables": [{"schema_name": "demo", "name": "customers"}],
+                        "next_cursor": "more",
+                        "row_count": 200,
+                    }
+                )
+            ),
+            "db_list_schemas": MCPToolResult(
+                content=json.dumps(
+                    {
+                        "schemas": [{"name": "demo"}, {"name": "sales"}],
+                        "next_cursor": None,
+                        "row_count": 2,
+                    }
+                )
+            ),
+        }
+    )
+    service = ChatService(_settings(monkeypatch), mcp)
+
+    _ = [event async for event in service.stream(_request())]
+
+    system = provider.calls[0][0]
+    assert "demo, sales" in system.content
+    assert "demo.customers" not in system.content
 
 
 async def test_system_prompt_is_prepended(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -155,9 +155,10 @@ export function SettingsPanel({
                 aria-label={t("apiKey")}
                 type="password"
                 autoComplete="new-password"
-                value={apiKey}
+                value={storedKey ? "••••••••••••" : apiKey}
+                disabled={storedKey}
                 onChange={(event) => setApiKey(event.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500"
               />
             </label>
 
